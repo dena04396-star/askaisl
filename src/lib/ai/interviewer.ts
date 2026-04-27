@@ -1,12 +1,15 @@
-import { openai } from "./openai";
-import { SYSTEM_PROMPT } from "./prompts";
-import type { ChatMessage } from "@/types";
+import { openai, getModelName } from "./openai";
+import { buildSystemPrompt } from "./prompts";
+import type { ChatMessage, Locale } from "@/types";
 
-export async function runInterviewer(messages: ChatMessage[]): Promise<string> {
+export async function runInterviewer(
+  messages: ChatMessage[],
+  language: Locale = "en"
+): Promise<string> {
   const response = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: getModelName(),
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: buildSystemPrompt(language) },
       ...messages.map((m) => ({ role: m.role, content: m.content })),
     ],
     temperature: 0.7,

@@ -6,10 +6,15 @@ import { openai } from "@/lib/ai/openai";
  * @param filename     Hint for the file type, e.g. "audio.webm"
  */
 export async function speechToText(
-  audioBuffer: Buffer,
+  audioBuffer: Uint8Array,
   filename = "audio.webm"
 ): Promise<string> {
-  const file = new File([audioBuffer], filename, { type: "audio/webm" });
+  const slice = audioBuffer.buffer.slice(
+    audioBuffer.byteOffset,
+    audioBuffer.byteOffset + audioBuffer.byteLength
+  ) as ArrayBuffer;
+  const blob = new Blob([slice], { type: "audio/webm" });
+  const file = new File([blob], filename, { type: "audio/webm" });
 
   const transcription = await openai.audio.transcriptions.create({
     file,

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runInterviewer } from "@/lib/ai/interviewer";
+import { isValidLocale } from "@/lib/i18n/config";
+import type { Locale } from "@/types";
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages } = await req.json();
+    const { messages, language } = await req.json();
 
     if (!Array.isArray(messages)) {
       return NextResponse.json(
@@ -12,7 +14,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const reply = await runInterviewer(messages);
+    const locale: Locale =
+      typeof language === "string" && isValidLocale(language)
+        ? language
+        : "en";
+
+    const reply = await runInterviewer(messages, locale);
     return NextResponse.json({ reply });
   } catch (error) {
     console.error("[/api/chat]", error);
