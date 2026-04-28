@@ -46,7 +46,9 @@ export async function streamTTS(
 
   // Validate the voice ID to prevent SSRF via URL injection
   if (!VOICE_ID_RE.test(rawVoiceId)) {
-    throw new Error("Invalid ElevenLabs voice ID");
+    throw new Error(
+      "Invalid ElevenLabs voice ID format. Voice IDs must be 10–30 alphanumeric characters."
+    );
   }
 
   const url = `${ELEVENLABS_BASE}/text-to-speech/${rawVoiceId}/stream`;

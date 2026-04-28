@@ -36,8 +36,8 @@ export async function saveTranscript(
     .select()
     .maybeSingle();
 
-  if (error) {
-    console.error("[transcript.service] saveTranscript error:", error.message);
+  if (error || !data) {
+    console.error("[transcript.service] saveTranscript error:", error?.message ?? "no data returned");
     // Fall back to memory so the app keeps working
     memoryStore.push(record);
     return record;
