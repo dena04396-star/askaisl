@@ -10,10 +10,17 @@ const ELEVENLABS_BASE = "https://api.elevenlabs.io/v1";
 // Default voice: Rachel – calm, professional female voice
 const DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 
+// Voice IDs contain only alphanumeric characters and are typically 20 chars
+const VOICE_ID_RE = /^[A-Za-z0-9]{10,30}$/;
+
 interface TTSOptions {
   voiceId?: string;
   stability?: number;
   similarityBoost?: number;
+  /**
+   * Speaking style intensity for ElevenLabs v2 models.
+   * Range 0–1: 0 = neutral/default, 1 = maximum style exaggeration.
+   */
   style?: number;
   useSpeakerBoost?: boolean;
 }
@@ -32,12 +39,17 @@ export async function streamTTS(
     throw new Error("ELEVENLABS_API_KEY is not configured");
   }
 
-  const voiceId =
+  const rawVoiceId =
     options.voiceId ??
     process.env.ELEVENLABS_VOICE_ID ??
     DEFAULT_VOICE_ID;
 
-  const url = `${ELEVENLABS_BASE}/text-to-speech/${voiceId}/stream`;
+  // Validate the voice ID to prevent SSRF via URL injection
+  if (!VOICE_ID_RE.test(rawVoiceId)) {
+    throw new Error("Invalid ElevenLabs voice ID");
+  }
+
+  const url = `${ELEVENLABS_BASE}/text-to-speech/${rawVoiceId}/stream`;
 
   const response = await fetch(url, {
     method: "POST",

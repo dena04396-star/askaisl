@@ -10,6 +10,9 @@ export function getDbClient(): SupabaseClient {
   if (_client) return _client;
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  // Prefer the service-role key for server-side operations (bypasses RLS).
+  // Falls back to the anon key only in environments where the service-role key
+  // is not available (e.g. CI preview deployments with read-only credentials).
   const key =
     process.env.SUPABASE_SERVICE_ROLE_KEY ??
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;

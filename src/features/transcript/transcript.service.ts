@@ -34,7 +34,7 @@ export async function saveTranscript(
       created_at: record.createdAt,
     })
     .select()
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error("[transcript.service] saveTranscript error:", error.message);

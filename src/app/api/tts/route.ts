@@ -14,7 +14,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const elevenResp = await streamTTS(text.slice(0, 5000), { voiceId });
+    const elevenResp = await streamTTS(
+      // Truncate to 5000 chars – ElevenLabs enforces a per-request text limit
+      text.slice(0, 5000),
+      { voiceId }
+    );
 
     // Pipe the ElevenLabs audio stream directly to the client
     return new Response(elevenResp.body, {
