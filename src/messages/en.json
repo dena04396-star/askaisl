@@ -1,0 +1,23 @@
+{
+  "nav": {
+    "start": "Start Interview",
+    "dashboard": "Dashboard",
+    "home": "Home"
+  },
+  "chat": {
+    "placeholder": "Type your answer…",
+    "send": "Send",
+    "mic": "Hold to speak",
+    "listening": "Listening…",
+    "thinking": "Interviewer is thinking…",
+    "speaking": "Speaking…",
+    "startHint": "Click below to start the interview"
+  },
+  "interview": {
+    "title": "Mock Interview",
+    "language": "Language"
+  },
+  "footer": {
+    "copy": "© 2025 Vinterview. All rights reserved."
+  }
+}
