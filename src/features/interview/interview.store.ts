@@ -16,12 +16,12 @@ export function useInterviewStore(language: Locale) {
     setStatus("active");
     setIsLoading(true);
     try {
-      const reply = await sendMessage([], language);
+      const reply = await sendMessage([], language, sessionId);
       setMessages([{ role: "assistant", content: reply }]);
     } finally {
       setIsLoading(false);
     }
-  }, [language]);
+  }, [language, sessionId]);
 
   const sendUserMessage = useCallback(
     async (content: string) => {
@@ -30,13 +30,13 @@ export function useInterviewStore(language: Locale) {
       setMessages(next);
       setIsLoading(true);
       try {
-        const reply = await sendMessage(next, language);
+        const reply = await sendMessage(next, language, sessionId);
         setMessages([...next, { role: "assistant", content: reply }]);
       } finally {
         setIsLoading(false);
       }
     },
-    [messages, language]
+    [messages, language, sessionId]
   );
 
   const reset = useCallback(() => {
