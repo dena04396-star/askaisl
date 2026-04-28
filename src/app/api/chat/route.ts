@@ -3,11 +3,11 @@ import { runInterviewer } from "@/lib/ai/interviewer";
 import { isValidLocale } from "@/lib/i18n/config";
 import { saveTranscript } from "@/features/transcript/transcript.service";
 import { generateId } from "@/lib/utils/helpers";
-import type { Locale } from "@/types";
+import type { Locale, StudyContext } from "@/types";
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, language, sessionId } = await req.json();
+    const { messages, language, sessionId, study } = await req.json();
 
     if (!Array.isArray(messages)) {
       return NextResponse.json(
@@ -21,9 +21,15 @@ export async function POST(req: NextRequest) {
         ? language
         : "en";
 
-    const reply = await runInterviewer(messages, locale);
+    const studyCtx: StudyContext | undefined =
+      study &&
+      typeof study.productCategory === "string" &&
+      typeof study.studyType === "string"
+        ? study
+        : undefined;
 
-    // Persist full conversation (fire-and-forget; don't block response)
+    const reply = await runInterviewer(messages, locale, studyCtx);
+
     const sid: string =
       typeof sessionId === "string" && sessionId ? sessionId : generateId();
     const allMessages = [

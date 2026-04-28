@@ -7,8 +7,8 @@
 
 const ELEVENLABS_BASE = "https://api.elevenlabs.io/v1";
 
-// Default voice: Rachel – calm, professional female voice
-const DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
+// Default voice: Alice - Clear, Engaging Educator
+const DEFAULT_VOICE_ID = "Xb7hH8MSUJpSbSDYk0k2";
 
 // Voice IDs contain only alphanumeric characters and are typically 20 chars
 const VOICE_ID_RE = /^[A-Za-z0-9]{10,30}$/;
@@ -40,8 +40,8 @@ export async function streamTTS(
   }
 
   const rawVoiceId =
-    options.voiceId ??
-    process.env.ELEVENLABS_VOICE_ID ??
+    options.voiceId ||
+    process.env.ELEVENLABS_VOICE_ID ||
     DEFAULT_VOICE_ID;
 
   // Validate the voice ID to prevent SSRF via URL injection

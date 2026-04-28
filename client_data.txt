@@ -1,0 +1,149 @@
+AI-Powered Interviewer – Requirements Template
+Please fill in the details below to help structure the system according to your needs.
+________________________________________
+1. Discussion Guide
+•	Main goal of the interview: Interaction with single or multiple consumers Independently 
+•	Target audience: Any one in Sri Lanka
+•	List of questions (in order):
+•	Questions will differ based on the insights trying to get
+•	•  Behavioral insights → habits, usage occasions, routines 
+•	•  Decision journey → why they choose Brand A vs B 
+•	•  Pain points → unmet needs (very valuable) 
+•	•  Perception tracking → brand image, trust, quality 
+•	•  Concept testing → reactions to new ideas/products
+
+If it is a behavioural study then below are the questions (Like wise check for others from AI)
+. Daily Routine & Context (Understand real-life usage)
+•	“Can you walk me through your typical day from morning to night?” 
+•	“At what times do you usually use [product category]?” 
+•	“Where are you usually when you use it? (home, work, outside)” 
+•	“Who else is involved when you use this product?” 
+👉 Insight: Usage occasions, context, influence of others
+________________________________________
+2. Last Usage (Most powerful section – anchor on reality)
+•	“When was the last time you used [product]?” 
+•	“What exactly happened from start to finish?” 
+•	“What made you decide to use it at that moment?” 
+•	“What product did you use specifically?” 
+•	“How did you feel after using it?” 
+👉 AI Probe:
+•	“Was this your usual routine or something different?” 
+👉 Insight: Real behavior vs claimed behavior
+________________________________________
+3. Habit Formation (Understand patterns)
+•	“How long have you been using this type of product?” 
+•	“Is this something you do daily, weekly, or occasionally?” 
+•	“What triggers you to use it?” 
+•	“Are there times you skip using it? Why?” 
+👉 Insight: Habit strength + triggers + drop-off points
+________________________________________
+4. Purchase Behaviour (Critical for FMCG)
+•	“When did you last buy this product?” 
+•	“Where did you buy it from?” 
+•	“What made you choose that store?” 
+•	“What options did you consider before buying?” 
+•	“Did you plan the purchase or was it spontaneous?” 
+👉 AI Probe:
+•	“What almost made you choose something else?” 
+👉 Insight: Decision journey + channel behavior
+________________________________________
+5. Brand Choice Behaviour
+•	“Which brand did you buy last time?” 
+•	“Why did you choose that brand?” 
+•	“Have you switched brands recently?” 
+•	“What made you switch?” 
+👉 AI Probe:
+•	“What would make you switch again?” 
+👉 Insight: Loyalty vs switching triggers
+________________________________________
+6. Decision Drivers (Real vs claimed)
+•	“What are the top things you look for when choosing this product?” 
+•	“Which matters more: price, quality, or availability?” 
+•	“Have you ever chosen a cheaper option instead? Why?” 
+👉 AI Probe:
+•	“Tell me about a time when you compromised” 
+👉 Insight: Trade-offs (very important)
+________________________________________
+7. Barriers & Pain Points
+•	“What do you find frustrating about this product/category?” 
+•	“Have you ever had a bad experience?” 
+•	“What problems do you face when buying or using it?” 
+👉 AI Probe:
+•	“How did you solve that issue?” 
+👉 Insight: Unmet needs (innovation goldmine)
+________________________________________
+8. Workarounds & Alternatives (Hidden behavior)
+•	“If this product is not available, what do you do?” 
+•	“Do you ever use something else instead?” 
+•	“Have you created your own solution?” 
+👉 Insight: Substitution behavior + innovation opportunities
+________________________________________
+9. Social & Influence Behaviour
+•	“Do you usually decide yourself or does someone influence you?” 
+•	“Have you ever tried a product because of someone else?” 
+•	“Do you recommend products to others?” 
+👉 Insight: Word-of-mouth power
+________________________________________
+10. Occasional vs Regular Users
+•	“Are there times you use this product more than usual?” 
+•	“What situations increase your usage?” 
+•	“When do you use it less?” 
+👉 Insight: Demand spikes + seasonality
+________________________________________
+11. Emotional & Functional Outcome
+•	“What does a ‘good experience’ with this product look like?” 
+•	“How do you feel when it works really well?” 
+•	“What makes it disappointing?” 
+👉 Insight: Emotional drivers (important for branding)
+________________________________________
+12. Future Behaviour Signals
+•	“Do you think your usage will change in the future?” 
+•	“What might make you use more or less?” 
+•	“Is there anything new you want to try?” 
+👉 Insight: Forward-looking trends
+
+•	Preferred probing style (e.g., deep, casual, short follow-ups):Casual but should be deep
+________________________________________
+2. Languages
+•	Primary language:Sinhala,tamil 
+•	Secondary languages (if any):English
+•	Tone preference per language (if different):
+________________________________________
+3. AI Persona
+•	Name (optional): Mrs Dissanayake
+•	Personality (professional / friendly / neutral): Professional but friendly
+•	Tone (formal / conversational): conversational
+•	Voice style (calm, confident, etc.):Calm and soft
+•	Any specific cultural traits (e.g., Sri Lankan professional woman): Sri Lankan professional woman
+________________________________________
+4. Respondent Details to Capture
+(Example: age, gender, location, occupation, etc.) any  one
+________________________________________
+5. Output / Insights Required
+•	Type of summary (short / detailed): Short to detail but show some good insights
+•	Key insights needed (pain points, needs, behavior, etc.): all are needed
+•	Should key quotes be extracted? (yes/no): yes
+________________________________________
+6. Voice Preferences
+•	Voice input (user speaks): yes / no
+•	Voice output (AI speaks): yes / no
+AI Avartar should independently conduct the interviewwith single or multiple Consumers. 
+________________________________________
+7. Admin Requirements
+•	Will you use multiple discussion guides? (yes/no): Yes
+•	Do you need to edit/update guides later? (yes/no): Yes
+________________________________________
+8. Export Requirements
+•	Export format: Excel / Word Excel
+•	Any specific format or structure needed:
+________________________________________
+9. Additional Notes (Optional)
+•	Any special requirements, features, or expectations:
+Avatar should be able to capture below
+•	•  Behavioral insights → habits, usage occasions, routines 
+•	•  Decision journey → why they choose Brand A vs B 
+•	•  Pain points → unmet needs (very valuable) 
+•	•  Perception tracking → brand image, trust, quality 
+•	•  Concept testing → reactions to new ideas/products
+________________________________________
+Once completed, please share this document so development can begin smoothly.
