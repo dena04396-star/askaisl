@@ -1,36 +1,138 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Vinterview – AI-Powered Mock Interviewer
 
-## Getting Started
+A production-ready AI interview practice app built with Next.js 16, featuring:
 
-First, run the development server:
+- 🤖 **DeepSeek AI** via OpenRouter – intelligent interview questions & follow-ups
+- 🎙️ **ElevenLabs TTS** – realistic female voice (Rachel) reads interviewer responses aloud
+- 🗣️ **Browser SpeechRecognition** – speak your answers hands-free
+- 🧊 **3D Avatar** – animated interviewer (three.js / React Three Fiber) synced to audio
+- 🌐 **Multilingual** – English, Sinhala, Tamil
+- 🗄️ **Supabase** – full transcript & summary persistence
+
+---
+
+## Quick Start
+
+### 1. Clone & install
+
+```bash
+git clone <repo-url>
+cd vinterview
+npm install
+```
+
+### 2. Set up environment variables
+
+```bash
+cp .env.example .env.local
+```
+
+Edit `.env.local` and fill in the required values:
+
+| Variable | Description |
+|---|---|
+| `NEXT_PUBLIC_APP_URL` | Your app URL (default: `http://localhost:3000`) |
+| `OPENROUTER_API_KEY` | Get one at [openrouter.ai/keys](https://openrouter.ai/keys) |
+| `NEXT_PUBLIC_SUPABASE_URL` | From your Supabase project settings |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon/public key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service-role key (never expose to browser) |
+| `ELEVENLABS_API_KEY` | Get one at [elevenlabs.io](https://elevenlabs.io/app/settings/api-keys) |
+| `ELEVENLABS_VOICE_ID` | ElevenLabs voice ID (default: Rachel) |
+
+### 3. Set up the Supabase database
+
+1. Open your Supabase project → SQL Editor
+2. Paste the contents of `public/schema.sql` and run it
+
+### 4. Run the dev server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) and click **Start Interview**.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## How to Change the Voice
 
-## Learn More
+The default voice is **Rachel** (voice ID: `21m00Tcm4TlvDq8ikWAM`), a calm, professional female voice provided by ElevenLabs.
 
-To learn more about Next.js, take a look at the following resources:
+To change the voice:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Browse voices at [elevenlabs.io/voice-library](https://elevenlabs.io/voice-library) or in the ElevenLabs dashboard
+2. Copy the **Voice ID** of your chosen voice
+3. Set it in `.env.local`:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+ELEVENLABS_VOICE_ID=<your-voice-id>
+```
 
-## Deploy on Vercel
+You can also adjust voice characteristics in `src/lib/speech/elevenlabs.ts`:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```ts
+voice_settings: {
+  stability: 0.5,         // 0–1: lower = more expressive, higher = more consistent
+  similarity_boost: 0.75, // 0–1: how closely to match the original voice
+  style: 0.0,             // 0–1: speaking style intensity (ElevenLabs v2)
+  use_speaker_boost: true,
+}
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## How to Update the Avatar
+
+The app includes a procedurally-generated 3D head as a fallback. To use a custom GLB avatar:
+
+1. Create a free avatar at [readyplayer.me](https://readyplayer.me)
+2. Export as `.glb`
+3. Place the file at `public/avatar.glb`
+
+The avatar will automatically load. If the file is missing, the built-in head renders instead.
+
+To adjust the avatar camera / position, edit `src/components/avatar/Avatar3D.tsx`.
+
+---
+
+## Architecture
+
+```
+src/
+├── app/                  # Next.js App Router
+│   ├── (marketing)/      # Landing page
+│   ├── (app)/chat/       # Interview UI
+│   └── api/
+│       ├── chat/         # AI chat endpoint (OpenRouter → DeepSeek)
+│       ├── tts/          # ElevenLabs TTS proxy
+│       ├── summary/      # Post-interview AI summary
+│       └── transcript/   # Transcript CRUD
+├── components/
+│   ├── avatar/           # 3D avatar (three.js)
+│   ├── chat/             # Chat UI + message bubbles
+│   └── layout/           # Navbar, Footer
+├── features/
+│   ├── interview/        # State (useInterviewStore), service, types
+│   ├── summary/          # Summary generation service
+│   └── transcript/       # Transcript persistence (Supabase)
+├── lib/
+│   ├── ai/               # OpenRouter/OpenAI client + prompts
+│   ├── db/               # Supabase client
+│   ├── speech/           # ElevenLabs TTS + speechToText utils
+│   ├── i18n/             # Locale config + detection
+│   └── utils/            # Helpers
+├── messages/             # i18n strings (en, si, ta)
+└── types/                # Shared TypeScript types
+```
+
+---
+
+## Production Deployment
+
+```bash
+npm run build
+npm start
+```
+
+Or deploy to [Vercel](https://vercel.com) – set the same environment variables in your project settings.
+

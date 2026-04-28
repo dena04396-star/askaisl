@@ -2,11 +2,22 @@ import OpenAI from "openai";
 
 /**
  * Returns a modular AI client.
- * Priority: DeepSeek (if DEEPSEEK_API_KEY is set) → OpenAI (OPENAI_API_KEY)
+ * Priority: OpenRouter (OPENROUTER_API_KEY) → DeepSeek (DEEPSEEK_API_KEY) → OpenAI (OPENAI_API_KEY)
  *
- * Both use the OpenAI-compatible SDK since DeepSeek exposes an OpenAI-compatible API.
+ * All providers use the OpenAI-compatible SDK.
  */
 function createAiClient(): OpenAI {
+  if (process.env.OPENROUTER_API_KEY) {
+    return new OpenAI({
+      apiKey: process.env.OPENROUTER_API_KEY,
+      baseURL: "https://openrouter.ai/api/v1",
+      defaultHeaders: {
+        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+        "X-Title": "Vinterview",
+      },
+    });
+  }
+
   if (process.env.DEEPSEEK_API_KEY) {
     return new OpenAI({
       apiKey: process.env.DEEPSEEK_API_KEY,
@@ -16,7 +27,7 @@ function createAiClient(): OpenAI {
 
   if (!process.env.OPENAI_API_KEY) {
     throw new Error(
-      "Missing AI API key. Set OPENAI_API_KEY or DEEPSEEK_API_KEY in your .env.local file."
+      "Missing AI API key. Set OPENROUTER_API_KEY, OPENAI_API_KEY, or DEEPSEEK_API_KEY in your .env.local file."
     );
   }
 
@@ -31,6 +42,7 @@ function createAiClient(): OpenAI {
  */
 export function getModelName(): string {
   if (process.env.AI_MODEL) return process.env.AI_MODEL;
+  if (process.env.OPENROUTER_API_KEY) return "deepseek/deepseek-chat";
   if (process.env.DEEPSEEK_API_KEY) return "deepseek-chat";
   return "gpt-4o";
 }

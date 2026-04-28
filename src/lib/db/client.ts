@@ -1,13 +1,28 @@
-// Database client placeholder.
-// Replace with your preferred ORM/driver (e.g. Prisma, Drizzle, pg).
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-let _client: unknown = null;
+let _client: SupabaseClient | null = null;
 
-export function getDbClient() {
-  if (!_client) {
-    // TODO: initialise your DB connection here
-    // e.g. new PrismaClient(), drizzle(connectionString), etc.
-    throw new Error("Database client is not yet configured");
+/**
+ * Returns a Supabase client using the service-role key (server-side only).
+ * Throws if the required environment variables are not set.
+ */
+export function getDbClient(): SupabaseClient {
+  if (_client) return _client;
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ??
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !key) {
+    throw new Error(
+      "Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env.local"
+    );
   }
+
+  _client = createClient(url, key, {
+    auth: { persistSession: false },
+  });
+
   return _client;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, startTransition } from "react";
 import MessageBubble from "./MessageBubble";
 import { useInterviewStore } from "@/features/interview/interview.store";
 import type { Locale } from "@/types";
@@ -38,6 +38,66 @@ const LOCALE_BCP47: Record<Locale, string> = {
   ta: "ta-IN",
 };
 
+/**
+ * Play text via ElevenLabs /api/tts.
+ * Falls back to Web Speech API if the TTS endpoint is unavailable.
+ * Returns a cleanup function that stops audio.
+ */
+async function playTTS(
+  text: string,
+  onStart: () => void,
+  onEnd: () => void,
+  lang: string
+): Promise<() => void> {
+  try {
+    const res = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+
+    if (!res.ok) throw new Error(`TTS HTTP ${res.status}`);
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+
+    audio.onplay = onStart;
+    audio.onended = () => {
+      onEnd();
+      URL.revokeObjectURL(url);
+    };
+    audio.onerror = () => {
+      onEnd();
+      URL.revokeObjectURL(url);
+    };
+
+    audio.play().catch(() => onEnd());
+
+    return () => {
+      audio.pause();
+      onEnd();
+      URL.revokeObjectURL(url);
+    };
+  } catch {
+    // Graceful fallback to browser TTS
+    if (typeof window === "undefined") return () => {};
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = lang;
+    utter.rate = 0.95;
+    utter.pitch = 1.1;
+    utter.onstart = onStart;
+    utter.onend = onEnd;
+    utter.onerror = onEnd;
+    window.speechSynthesis.speak(utter);
+    return () => {
+      window.speechSynthesis.cancel();
+      onEnd();
+    };
+  }
+}
+
 export default function ChatInterface() {
   const [language, setLanguage] = useState<Locale>("en");
   const [input, setInput] = useState("");
@@ -48,7 +108,7 @@ export default function ChatInterface() {
   const bottomRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
-  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const stopAudioRef = useRef<(() => void) | null>(null);
 
   const { messages, status, isLoading, startInterview, sendUserMessage } =
     useInterviewStore(language);
@@ -59,7 +119,7 @@ export default function ChatInterface() {
       typeof window !== "undefined" &&
       (window.SpeechRecognition || window.webkitSpeechRecognition)
     ) {
-      setMicSupported(true);
+      startTransition(() => setMicSupported(true));
     }
   }, []);
 
@@ -68,23 +128,19 @@ export default function ChatInterface() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
-  // Speak assistant messages via Web Speech API
   const speak = useCallback(
-    (text: string) => {
-      if (typeof window === "undefined") return;
-      window.speechSynthesis.cancel();
+    async (text: string) => {
+      // Stop any currently playing audio
+      stopAudioRef.current?.();
+      stopAudioRef.current = null;
 
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = LOCALE_BCP47[language];
-      utter.rate = 0.95;
-      utter.pitch = 1.1;
-
-      utter.onstart = () => setIsSpeaking(true);
-      utter.onend = () => setIsSpeaking(false);
-      utter.onerror = () => setIsSpeaking(false);
-
-      utteranceRef.current = utter;
-      window.speechSynthesis.speak(utter);
+      const cleanup = await playTTS(
+        text,
+        () => setIsSpeaking(true),
+        () => setIsSpeaking(false),
+        LOCALE_BCP47[language]
+      );
+      stopAudioRef.current = cleanup;
     },
     [language]
   );
@@ -93,19 +149,17 @@ export default function ChatInterface() {
   const lastAssistantMsg = messages.filter((m) => m.role === "assistant").at(-1);
   const spokenRef = useRef<string>("");
   useEffect(() => {
-    if (
-      lastAssistantMsg &&
-      lastAssistantMsg.content !== spokenRef.current
-    ) {
+    if (lastAssistantMsg && lastAssistantMsg.content !== spokenRef.current) {
       spokenRef.current = lastAssistantMsg.content;
       speak(lastAssistantMsg.content);
     }
   }, [lastAssistantMsg, speak]);
 
-  // Stop speech when language changes (new interview will restart)
+  // Stop speech when language changes
   useEffect(() => {
-    window.speechSynthesis?.cancel();
-    setIsSpeaking(false);
+    stopAudioRef.current?.();
+    stopAudioRef.current = null;
+    startTransition(() => setIsSpeaking(false));
   }, [language]);
 
   const handleSend = async () => {
