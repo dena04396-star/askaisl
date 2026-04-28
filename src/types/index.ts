@@ -7,11 +7,24 @@ export interface ChatMessage {
 
 export type Locale = "en" | "si" | "ta";
 
+export type StudyType =
+  | "behavioral"
+  | "decision_journey"
+  | "pain_points"
+  | "perception"
+  | "concept_testing";
+
+export interface StudyContext {
+  productCategory: string;
+  studyType: StudyType;
+}
+
 export interface InterviewSession {
   id: string;
   messages: ChatMessage[];
   language: Locale;
   startedAt: string;
+  study?: StudyContext;
 }
 
 export interface TranscriptEntry {
@@ -21,9 +34,12 @@ export interface TranscriptEntry {
 }
 
 export interface SummaryResult {
-  strengths: string;
-  improvements: string;
-  score: number;
-  justification: string;
   raw: string;
+}
+
+export interface RespondentDetails {
+  name?: string;
+  age?: string;
+  gender?: string;
+  district?: string;
 }

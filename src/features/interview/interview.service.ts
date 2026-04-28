@@ -1,17 +1,15 @@
-import type { ChatMessage, Locale } from "@/types";
+import type { ChatMessage, Locale, StudyContext } from "@/types";
 
-/**
- * Send a message to the AI interviewer and get a reply.
- */
 export async function sendMessage(
   messages: ChatMessage[],
   language: Locale,
-  sessionId?: string
+  sessionId?: string,
+  study?: StudyContext
 ): Promise<string> {
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ messages, language, sessionId }),
+    body: JSON.stringify({ messages, language, sessionId, study }),
   });
 
   if (!res.ok) {

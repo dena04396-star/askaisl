@@ -1,15 +1,16 @@
 import { openai, getModelName } from "./openai";
 import { buildSystemPrompt } from "./prompts";
-import type { ChatMessage, Locale } from "@/types";
+import type { ChatMessage, Locale, StudyContext } from "@/types";
 
 export async function runInterviewer(
   messages: ChatMessage[],
-  language: Locale = "en"
+  language: Locale = "en",
+  study?: StudyContext
 ): Promise<string> {
   const response = await openai.chat.completions.create({
     model: getModelName(),
     messages: [
-      { role: "system", content: buildSystemPrompt(language) },
+      { role: "system", content: buildSystemPrompt(language, study) },
       ...messages.map((m) => ({ role: m.role, content: m.content })),
     ],
     temperature: 0.7,
@@ -17,9 +18,6 @@ export async function runInterviewer(
   });
 
   const content = response.choices[0]?.message?.content;
-  if (!content) {
-    throw new Error("No response from AI model");
-  }
-
+  if (!content) throw new Error("No response from AI model");
   return content;
 }

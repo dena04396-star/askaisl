@@ -1,8 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --surface: #ffffff;
+  --border: #e2e8f0;
+  --muted: #94a3b8;
+  --primary: #0f766e;
+  --primary-light: #ccfbf1;
+  --accent: #b45309;
 }
 
 @theme inline {
@@ -14,13 +20,64 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0b1120;
+    --foreground: #f1f5f9;
+    --surface: #111827;
+    --border: #1e293b;
+    --muted: #475569;
+    --primary: #14b8a6;
+    --primary-light: #042f2e;
+    --accent: #fbbf24;
   }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Speaking pulse ring */
+@keyframes speakPulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.04); }
+}
+
+.speak-ring {
+  animation: speakPulse 1.2s ease-in-out infinite;
+}
+
+/* Waveform bars */
+@keyframes bar1 { 0%,100%{height:6px} 50%{height:18px} }
+@keyframes bar2 { 0%,100%{height:10px} 50%{height:24px} }
+@keyframes bar3 { 0%,100%{height:4px} 50%{height:14px} }
+
+.wave-bar-1 { animation: bar1 0.9s ease-in-out infinite; }
+.wave-bar-2 { animation: bar2 0.9s ease-in-out infinite 0.15s; }
+.wave-bar-3 { animation: bar3 0.9s ease-in-out infinite 0.3s; }
+.wave-bar-4 { animation: bar2 0.9s ease-in-out infinite 0.45s; }
+.wave-bar-5 { animation: bar1 0.9s ease-in-out infinite 0.6s; }
