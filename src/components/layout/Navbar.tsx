@@ -48,7 +48,7 @@ export default function Navbar() {
         ) : (
           <>
             <Link href="/login" className="vt-btn-ghost">Sign in</Link>
-            <Link href="/signup" className="vt-btn-solid">Get started</Link>
+            <Link href="/login" className="vt-btn-solid">Get started</Link>
           </>
         )}
       </div>

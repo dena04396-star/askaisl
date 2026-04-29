@@ -28,7 +28,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     });
     const { data: { subscription } } = client.auth.onAuthStateChange((_, session) => {
-      setUser(session?.user ?? null);
+      // Only update if the user ID actually changed to prevent spurious re-renders
+      setUser((prev) => {
+        const next = session?.user ?? null;
+        if (prev?.id === next?.id) return prev;
+        return next;
+      });
     });
     return () => subscription.unsubscribe();
   }, []);

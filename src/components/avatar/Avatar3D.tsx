@@ -14,7 +14,6 @@ export interface Avatar3DProps {
 
 /* ─── Ready Player Me female avatar with ARKit + Oculus Visemes ─── */
 const RPM_URL =
-  (typeof process !== "undefined" && process.env.NEXT_PUBLIC_AVATAR_GLB_URL) ||
   "https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb" +
   "?morphTargets=ARKit,Oculus%20Visemes&textureAtlas=1024&lod=0";
 
@@ -311,21 +310,13 @@ function AvatarScene(props: Avatar3DProps) {
 
 /* ─── Public export ─── */
 export default function Avatar3D(props: Avatar3DProps) {
-  const { isSpeaking } = props;
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%" }}>
-      {/* Speaking pulse ring overlays */}
-      {isSpeaking && (
-        <>
-          <div style={{ position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none", borderRadius: "inherit", boxShadow: "inset 0 0 0 2px rgba(0,0,0,0.12)", animation: "speak-ring 0.7s ease-in-out infinite" }} />
-          <div style={{ position: "absolute", inset: -4, zIndex: 10, pointerEvents: "none", borderRadius: "inherit", boxShadow: "0 0 0 1.5px rgba(0,0,0,0.06)", animation: "speak-ring 0.7s ease-in-out infinite 0.18s" }} />
-        </>
-      )}
-
+    /* position:absolute + inset:0 gives R3F Canvas explicit pixel dimensions from its positioned parent */
+    <div style={{ position: "absolute", inset: 0 }}>
       <Canvas
-        camera={{ position: [0, 0.28, 1.52], fov: 30 }}
+        camera={{ position: [0, 0.18, 1.65], fov: 28 }}
         shadows
-        style={{ background: "transparent" }}
+        style={{ width: "100%", height: "100%", background: "transparent", display: "block" }}
         gl={{ antialias: true, alpha: true }}
       >
         <AvatarScene {...props} />

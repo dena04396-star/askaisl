@@ -6,6 +6,7 @@ import MessageBubble from "./MessageBubble";
 import { Button } from "@/components/ui/Button";
 import { useInterviewStore } from "@/features/interview/interview.store";
 import type { Locale, StudyType, StudyContext, RespondentDetails } from "@/types";
+import AvatarPortrait from "@/components/avatar/AvatarPortrait";
 
 declare global {
   interface Window {
@@ -27,98 +28,54 @@ const STUDY_OPTIONS: { id: StudyType; label: string; description: string }[] = [
   { id: "concept_testing",  label: "Concept Test",      description: "Reactions to new products"     },
 ];
 
-const FEMALE_VOICE_PREFS = [
-  "samantha","google uk english female","google us english female",
-  "female","woman","fiona","victoria","karen","moira","veena","zira","hazel",
-];
 
-function pickFemaleVoice(lang: string): SpeechSynthesisVoice | null {
+/* ─── TTS: ElevenLabs primary, Web Speech fallback ── */
+const FEMALE_PREFS = ["samantha","google uk english female","google us english female","female","woman","fiona","victoria","karen","moira","veena","zira","hazel"];
+function pickVoice(lang: string): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis.getVoices();
   if (!voices.length) return null;
   const prefix = lang.split("-")[0];
-  for (const p of FEMALE_VOICE_PREFS) {
-    const v = voices.find((v) => v.lang.startsWith(prefix) && v.name.toLowerCase().includes(p));
-    if (v) return v;
+  const exact = voices.find((v) => v.lang === lang); if (exact) return exact;
+  const pre   = voices.find((v) => v.lang.startsWith(prefix)); if (pre) return pre;
+  if (prefix === "en") {
+    for (const p of FEMALE_PREFS) { const v = voices.find((v) => v.lang.startsWith("en") && v.name.toLowerCase().includes(p)); if (v) return v; }
+    return voices.find((v) => v.lang.startsWith("en")) ?? null;
   }
-  for (const p of FEMALE_VOICE_PREFS) {
-    const v = voices.find((v) => v.name.toLowerCase().includes(p));
-    if (v) return v;
-  }
-  return voices.find((v) => !v.name.toLowerCase().includes("male") && !v.name.toLowerCase().includes(" man")) ?? null;
+  return voices.find((v) => !v.name.toLowerCase().includes("male")) ?? null;
 }
 
 async function playTTS(
-  text: string,
-  onStart: () => void,
-  onEnd: () => void,
-  lang: string,
-  onWordChange?: (count: number) => void,
+  text: string, onStart: () => void, onEnd: () => void, lang: string,
+  onWord?: (n: number) => void,
 ): Promise<() => void> {
   const total = text.split(/\s+/).filter(Boolean).length;
   try {
-    const res = await fetch("/api/tts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
+    const res = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
     if (!res.ok) throw new Error(`TTS ${res.status}`);
-    const blob = await res.blob();
-    const url  = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(await res.blob());
     const audio = new Audio(url);
     audio.onplay = onStart;
-    audio.ontimeupdate = () => {
-      if (!onWordChange || !isFinite(audio.duration) || audio.duration === 0) return;
-      onWordChange(Math.min(Math.ceil((audio.currentTime / audio.duration) * total), total));
-    };
-    audio.onended = () => { onWordChange?.(total); onEnd(); URL.revokeObjectURL(url); };
-    audio.onerror = () => { onWordChange?.(total); onEnd(); URL.revokeObjectURL(url); };
-    audio.play().catch(() => { onWordChange?.(total); onEnd(); });
+    audio.ontimeupdate = () => { if (!onWord || !isFinite(audio.duration) || !audio.duration) return; onWord(Math.min(Math.ceil((audio.currentTime / audio.duration) * total), total)); };
+    audio.onended = () => { onWord?.(total); onEnd(); URL.revokeObjectURL(url); };
+    audio.onerror = () => { onWord?.(total); onEnd(); URL.revokeObjectURL(url); };
+    audio.play().catch(() => { onWord?.(total); onEnd(); });
     return () => { audio.pause(); onEnd(); URL.revokeObjectURL(url); };
   } catch {
     if (typeof window === "undefined") return () => {};
     window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(text);
-    utter.lang  = lang;
-    utter.rate  = 0.90;
-    utter.pitch = 1.10;
+    utter.lang = lang; utter.rate = 0.9; utter.pitch = 1.1;
     const go = () => {
-      const voice = pickFemaleVoice(lang);
-      if (voice) utter.voice = voice;
+      const v = pickVoice(lang); if (v) utter.voice = v;
       utter.onstart = onStart;
-      utter.onend   = () => { onWordChange?.(total); (onEnd as () => void)(); };
-      utter.onerror = () => { onWordChange?.(total); (onEnd as () => void)(); };
-      utter.onboundary = (e: SpeechSynthesisEvent) => {
-        if (e.name === "word" && onWordChange)
-          onWordChange(text.slice(0, e.charIndex).split(/\s+/).filter(Boolean).length + 1);
-      };
+      utter.onend   = () => { onWord?.(total); onEnd(); };
+      utter.onerror = () => { onWord?.(total); onEnd(); };
+      utter.onboundary = (e: SpeechSynthesisEvent) => { if (e.name === "word" && onWord) onWord(text.slice(0, e.charIndex).split(/\s+/).filter(Boolean).length + 1); };
       window.speechSynthesis.speak(utter);
     };
-    window.speechSynthesis.getVoices().length === 0
-      ? (window.speechSynthesis.onvoiceschanged = go)
-      : go();
-    return () => { window.speechSynthesis.cancel(); onWordChange?.(total); onEnd(); };
+    window.speechSynthesis.getVoices().length === 0 ? (window.speechSynthesis.onvoiceschanged = go) : go();
+    return () => { window.speechSynthesis.cancel(); onWord?.(total); onEnd(); };
   }
-}
-
-/* ─── Avatar SVG face ── */
-function AvatarFace() {
-  return (
-    <svg width="108" height="108" viewBox="0 0 54 54" fill="none">
-      <ellipse cx="27" cy="52" rx="16" ry="7" fill="var(--bg3)" opacity="0.6"/>
-      <rect x="22.5" y="42" width="7" height="7" rx="1.5" fill="var(--txt3)" opacity="0.4"/>
-      <ellipse cx="27" cy="30" rx="14" ry="15" fill="var(--txt3)" opacity="0.5"/>
-      <ellipse cx="27" cy="16" rx="14" ry="7" fill="var(--border2)" opacity="0.9"/>
-      <ellipse cx="14" cy="26" rx="3" ry="8" fill="var(--border2)" opacity="0.8"/>
-      <ellipse cx="40" cy="26" rx="3" ry="8" fill="var(--border2)" opacity="0.8"/>
-      <ellipse cx="20" cy="29" rx="3" ry="3.2" fill="var(--txt)"/>
-      <ellipse cx="34" cy="29" rx="3" ry="3.2" fill="var(--txt)"/>
-      <circle cx="21" cy="28" r="1" fill="var(--bg)" opacity="0.5"/>
-      <circle cx="35" cy="28" r="1" fill="var(--bg)" opacity="0.5"/>
-      <path d="M17 25 Q20 23 23 25" stroke="var(--border2)" strokeWidth="1.2" strokeLinecap="round"/>
-      <path d="M31 25 Q34 23 37 25" stroke="var(--border2)" strokeWidth="1.2" strokeLinecap="round"/>
-      <path d="M23 40 Q27 43 31 40" stroke="var(--border2)" strokeWidth="1.2" strokeLinecap="round"/>
-    </svg>
-  );
 }
 
 /* ─── SETUP ── */
@@ -490,7 +447,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
       () => setIsSpeaking(true),
       () => { setIsSpeaking(false); setRevealedWords(-1); },
       LOCALE_BCP47[language],
-      (count) => setRevealedWords(count),
+      (n) => setRevealedWords(n),
     );
     stopAudioRef.current = cleanup;
   }, [language]);
@@ -501,10 +458,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   useEffect(() => {
     if (!lastAssistantMsg?.content || isLoading) return;
     const idx = messages.length - 1;
-    if (spokenRef.current !== idx) {
-      spokenRef.current = idx;
-      speak(lastAssistantMsg.content);
-    }
+    if (spokenRef.current !== idx) { spokenRef.current = idx; speak(lastAssistantMsg.content); }
   }, [lastAssistantMsg, isLoading, messages.length, speak]);
 
   const handleSend = async () => {
@@ -563,80 +517,61 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 400px", height: "100vh", overflow: "hidden" }}>
 
-      {/* ── LEFT: av-side ── */}
-      <div style={{ display: "flex", flexDirection: "column", borderRight: "1px solid var(--border)", position: "relative", overflow: "hidden", background: "var(--bg2)" }}>
-        {/* radial bg */}
-        <div aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(ellipse 70% 60% at 50% 55%, var(--bg3) 0%, transparent 70%)" }} />
+      {/* ── LEFT: avatar side ── */}
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", borderRight: "1px solid var(--border)", overflow: "hidden", background: "#0d0d0f" }}>
 
         {/* Topbar */}
-        <div style={{ position: "relative", zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 26px", borderBottom: "1px solid var(--border)", background: "var(--bg)" }}>
+        <div style={{ position: "relative", zIndex: 10, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderBottom: "1px solid rgba(255,255,255,0.07)", background: "rgba(13,13,15,0.85)", backdropFilter: "blur(10px)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 11px", borderRadius: 99, background: "rgba(22,163,74,0.1)", border: "1px solid rgba(22,163,74,0.25)", fontSize: 11, fontWeight: 600, color: "#16a34a", letterSpacing: "0.05em" }}>
-              <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#16a34a", animation: "blink 1.6s infinite", display: "inline-block" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 11px", borderRadius: 99, background: "rgba(22,163,74,0.15)", border: "1px solid rgba(22,163,74,0.30)", fontSize: 11, fontWeight: 600, color: "#4ade80", letterSpacing: "0.05em" }}>
+              <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#4ade80", animation: "blink 1.6s infinite", display: "inline-block" }} />
               LIVE
             </div>
-            <span style={{ fontSize: 13, color: "var(--txt2)" }}>{timerStr}</span>
+            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.45)" }}>{timerStr}</span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            {/* settings icon btn */}
-            <button
-              title="Settings"
-              style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--txt2)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg3)"; e.currentTarget.style.color = "var(--txt)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "var(--bg2)"; e.currentTarget.style.color = "var(--txt2)"; }}
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.3"/><path d="M7 1v1.5M7 11.5V13M1 7h1.5M11.5 7H13M2.93 2.93l1.06 1.06M10.01 10.01l1.06 1.06M2.93 11.07l1.06-1.06M10.01 3.99l1.06-1.06" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
-            </button>
-            {/* leave (danger) */}
             <button
               title="End session"
               onClick={endInterview}
-              style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--txt2)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.08)"; e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.25)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "var(--bg2)"; e.currentTarget.style.color = "var(--txt2)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+              style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.18)"; e.currentTarget.style.color = "#f87171"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.35)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.5)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)"; }}
             >
               <PhoneOff size={13} />
             </button>
           </div>
         </div>
 
-        {/* Stage */}
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", position: "relative", zIndex: 1 }}>
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 26 }}>
-            {/* Avatar circle + rings */}
-            <div style={{ position: "relative" }}>
-              <div className={`av-ring${isSpeaking ? " speaking" : ""}`} />
-              <div className={`av-ring-2${isSpeaking ? " speaking" : ""}`} />
-              <div style={{ width: 192, height: 192, borderRadius: "50%", background: "var(--bg)", border: "1.5px solid var(--border2)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "var(--shadow-lg)", overflow: "hidden", position: "relative" }}>
-                <AvatarFace />
-                <div aria-hidden style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "radial-gradient(ellipse at 50% 20%, var(--bg3) 0%, transparent 55%)", pointerEvents: "none" }} />
-              </div>
-            </div>
+        {/* Avatar portrait */}
+        <div style={{ flex: 1, position: "relative", minHeight: 0, overflow: "hidden" }}>
+          <AvatarPortrait isSpeaking={isSpeaking} isListening={isListening} />
 
-            {/* Name & role */}
+          {/* Bottom gradient overlay */}
+          <div aria-hidden style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 220, pointerEvents: "none", background: "linear-gradient(to top, rgba(13,13,15,0.95) 0%, transparent 100%)" }} />
+
+          {/* Name / status / waveform overlay */}
+          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 5, padding: "0 28px 28px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
             <div style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 17, fontWeight: 500, letterSpacing: "-0.01em", marginBottom: 4, color: "var(--txt)" }}>Mrs Dissanayake</div>
-              <div style={{ fontSize: 13, color: "var(--txt2)", fontWeight: 300 }}>Market Research Interviewer</div>
+              <div style={{ fontSize: 17, fontWeight: 500, color: "#ffffff", letterSpacing: "-0.01em" }}>Mrs Dissanayake</div>
+              <div style={{ fontSize: 12.5, color: "rgba(255,255,255,0.45)", fontWeight: 300, marginTop: 3 }}>Market Research Interviewer</div>
             </div>
 
             {/* Waveform */}
-            <div style={{ display: "flex", alignItems: "center", gap: 3, height: 22, opacity: isSpeaking ? 1 : 0.3, transition: "opacity 0.3s" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 3, height: 20, opacity: isSpeaking ? 1 : 0.25, transition: "opacity 0.35s" }}>
               <span className="wb wb-1" /><span className="wb wb-2" /><span className="wb wb-3" />
               <span className="wb wb-4" /><span className="wb wb-5" /><span className="wb wb-6" /><span className="wb wb-7" />
             </div>
 
             {/* Status pill */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 18px", borderRadius: 99, background: "var(--bg)", border: "1px solid var(--border)", fontSize: 12.5, color: "var(--txt2)" }}>
-              <span style={statusDotStyle} />
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 16px", borderRadius: 99, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", fontSize: 12, color: "rgba(255,255,255,0.65)" }}>
+              <span style={{ ...statusDotStyle, background: isSpeaking ? "#4ade80" : isLoading ? "#fbbf24" : isListening ? "#60a5fa" : "rgba(255,255,255,0.25)" }} />
               {statusLabel}
             </div>
 
-            {/* Study info */}
+            {/* Study chip */}
             {study && (
-              <div style={{ padding: "10px 16px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)", maxWidth: 220, textAlign: "center" }}>
-                <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--txt3)", marginBottom: 4 }}>Active Study</div>
-                <div style={{ fontSize: 13, fontWeight: 500, color: "var(--txt)" }}>{study.productCategory}</div>
-                <div style={{ fontSize: 11.5, color: "var(--txt3)", marginTop: 2 }}>{STUDY_OPTIONS.find((s) => s.id === study.studyType)?.label}</div>
+              <div style={{ padding: "6px 14px", borderRadius: 99, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", fontSize: 11.5, color: "rgba(255,255,255,0.40)", letterSpacing: "0.02em" }}>
+                {study.productCategory} · {STUDY_OPTIONS.find((s) => s.id === study.studyType)?.label}
               </div>
             )}
           </div>

@@ -117,7 +117,10 @@ export default function DashboardPage() {
       .single();
     setCreating(false);
     if (error) { setCreateError(error.message); return; }
-    setSessions((prev) => [data as SessionRow, ...prev]);
+    setSessions((prev) => {
+      const created = data as SessionRow;
+      return [created, ...prev.filter((s) => s.id !== created.id)];
+    });
     resetCreate();
   }
 
@@ -230,7 +233,7 @@ export default function DashboardPage() {
           )}
 
           {/* Sessions list */}
-          {sessionsLoading ? <Dots /> : sessions.length === 0 ? (
+          {sessionsLoading ? <Dots /> : sessions.filter((s, i, a) => a.findIndex(x => x.id === s.id) === i).length === 0 ? (
             <div style={{ padding: "60px 0", textAlign: "center", border: "1px dashed var(--border2)", borderRadius: 16 }}>
               <div style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 400, color: "var(--txt2)", marginBottom: 8 }}>
                 No sessions yet
@@ -239,9 +242,9 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div style={{ border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden" }}>
-              {sessions.map((s, i) => (
+              {sessions.filter((s, i, a) => a.findIndex(x => x.id === s.id) === i).map((s, i, arr) => (
                 <div key={s.id}
-                  style={{ display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 20, padding: "20px 24px", borderBottom: i < sessions.length - 1 ? "1px solid var(--border)" : "none", transition: "background 0.15s" }}
+                  style={{ display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 20, padding: "20px 24px", borderBottom: i < arr.length - 1 ? "1px solid var(--border)" : "none", transition: "background 0.15s" }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "var(--bg2)"; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "";          }}
                 >
@@ -302,7 +305,7 @@ export default function DashboardPage() {
             <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 20 }}>
               {/* Session list */}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {transcripts.map((t, i) => {
+                {transcripts.filter((t, i, a) => a.findIndex(x => x.sessionId === t.sessionId) === i).map((t, i) => {
                   const turns    = t.messages.filter((m) => m.role === "user").length;
                   const isActive = selected?.sessionId === t.sessionId;
                   return (
