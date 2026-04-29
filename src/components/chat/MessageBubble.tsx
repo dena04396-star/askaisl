@@ -1,36 +1,49 @@
 import type { ChatMessage } from "@/types";
 
-interface MessageBubbleProps {
+interface Props {
   message: ChatMessage;
+  /** ≥0 = karaoke mode (word N highlighted); undefined = show all */
+  revealedWords?: number;
 }
 
-export default function MessageBubble({ message }: MessageBubbleProps) {
-  const isUser = message.role === "user";
+function renderKaraoke(content: string, revealedWords: number) {
+  const tokens = content.split(/(\s+)/);
+  let wi = 0;
+  return tokens.map((t, i) => {
+    if (/^\s+$/.test(t)) return <span key={i}>{t}</span>;
+    const isCurrent = wi++ === revealedWords - 1;
+    return isCurrent
+      ? <mark key={i} className="karaoke">{t}</mark>
+      : <span key={i}>{t}</span>;
+  });
+}
+
+export default function MessageBubble({ message, revealedWords }: Props) {
+  const isUser   = message.role === "user";
+  const isKaraoke = !isUser && revealedWords !== undefined && revealedWords >= 0;
 
   return (
-    <div className={`flex w-full items-end gap-2.5 ${isUser ? "flex-row-reverse" : "flex-row"}`}>
-      {/* Avatar initial */}
-      {!isUser && (
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-700 text-xs font-bold text-white shadow-sm">
-          D
-        </div>
-      )}
-
-      <div
-        className={`max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
-          isUser
-            ? "rounded-br-md bg-teal-700 text-white"
-            : "rounded-bl-md bg-white text-slate-800 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:ring-slate-700"
-        }`}
+    <div className={`flex flex-col gap-1 ${isUser ? "items-end" : "items-start"} bubble-in`}>
+      <span
+        style={{ fontSize: 11, color: "var(--txt3)", textTransform: "uppercase", letterSpacing: "0.06em", paddingInline: 12 }}
       >
-        {message.content}
+        {isUser ? "You" : "Mrs Dissanayake"}
+      </span>
+      <div
+        style={{
+          maxWidth: "88%",
+          padding: "11px 14px",
+          fontSize: 13.5,
+          lineHeight: 1.65,
+          fontWeight: 300,
+          borderRadius: 14,
+          ...(isUser
+            ? { background: "var(--inv)", color: "var(--inv-txt)", borderBottomRightRadius: 4 }
+            : { background: "var(--bg2)", border: "1px solid var(--border)", borderBottomLeftRadius: 4, color: "var(--txt)" }),
+        }}
+      >
+        {isKaraoke ? <>{renderKaraoke(message.content, revealedWords)}</> : message.content}
       </div>
-
-      {isUser && (
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-600 shadow-sm dark:bg-slate-700 dark:text-slate-300">
-          U
-        </div>
-      )}
     </div>
   );
 }

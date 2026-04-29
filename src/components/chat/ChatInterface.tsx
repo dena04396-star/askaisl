@@ -1,25 +1,11 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import {
-  useEffect,
-  useRef,
-  useState,
-  useCallback,
-  startTransition,
-} from "react";
+import { useEffect, useRef, useState, useCallback, startTransition } from "react";
+import { Mic, MicOff, Send, PhoneOff, Copy, Check, Download, Plus, ChevronRight, Globe, User } from "lucide-react";
 import MessageBubble from "./MessageBubble";
+import { Button } from "@/components/ui/Button";
 import { useInterviewStore } from "@/features/interview/interview.store";
 import type { Locale, StudyType, StudyContext, RespondentDetails } from "@/types";
-
-const Avatar3D = dynamic(() => import("@/components/avatar/Avatar3D"), {
-  ssr: false,
-  loading: () => (
-    <div className="flex h-full w-full items-center justify-center">
-      <div className="h-20 w-20 animate-pulse rounded-full bg-teal-700/40" />
-    </div>
-  ),
-});
 
 declare global {
   interface Window {
@@ -30,57 +16,45 @@ declare global {
   }
 }
 
-const LOCALE_LABELS: Record<Locale, string> = {
-  en: "English",
-  si: "සිංහල",
-  ta: "தமிழ்",
-};
+const LOCALE_LABELS: Record<Locale, string> = { en: "English", si: "සිංහල", ta: "தமிழ்" };
+const LOCALE_BCP47: Record<Locale, string>  = { en: "en-US",   si: "si-LK", ta: "ta-IN"  };
 
-const LOCALE_BCP47: Record<Locale, string> = {
-  en: "en-US",
-  si: "si-LK",
-  ta: "ta-IN",
-};
-
-const STUDY_OPTIONS: { id: StudyType; label: string; description: string; icon: string }[] = [
-  {
-    id: "behavioral",
-    label: "Behavioral Insights",
-    description: "Habits, usage occasions & routines",
-    icon: "🔄",
-  },
-  {
-    id: "decision_journey",
-    label: "Decision Journey",
-    description: "Why they choose Brand A vs B",
-    icon: "🧭",
-  },
-  {
-    id: "pain_points",
-    label: "Pain Points",
-    description: "Frustrations & unmet needs",
-    icon: "⚡",
-  },
-  {
-    id: "perception",
-    label: "Perception Tracking",
-    description: "Brand image, trust & quality",
-    icon: "🎯",
-  },
-  {
-    id: "concept_testing",
-    label: "Concept Testing",
-    description: "Reactions to new products",
-    icon: "💡",
-  },
+const STUDY_OPTIONS: { id: StudyType; label: string; description: string }[] = [
+  { id: "behavioral",       label: "Behavioral",       description: "Habits & usage patterns"      },
+  { id: "decision_journey", label: "Decision Journey", description: "Choice drivers & brand switch" },
+  { id: "pain_points",      label: "Pain Points",       description: "Frustrations & unmet needs"   },
+  { id: "perception",       label: "Perception",        description: "Brand image & trust scores"    },
+  { id: "concept_testing",  label: "Concept Test",      description: "Reactions to new products"     },
 ];
+
+const FEMALE_VOICE_PREFS = [
+  "samantha","google uk english female","google us english female",
+  "female","woman","fiona","victoria","karen","moira","veena","zira","hazel",
+];
+
+function pickFemaleVoice(lang: string): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return null;
+  const prefix = lang.split("-")[0];
+  for (const p of FEMALE_VOICE_PREFS) {
+    const v = voices.find((v) => v.lang.startsWith(prefix) && v.name.toLowerCase().includes(p));
+    if (v) return v;
+  }
+  for (const p of FEMALE_VOICE_PREFS) {
+    const v = voices.find((v) => v.name.toLowerCase().includes(p));
+    if (v) return v;
+  }
+  return voices.find((v) => !v.name.toLowerCase().includes("male") && !v.name.toLowerCase().includes(" man")) ?? null;
+}
 
 async function playTTS(
   text: string,
   onStart: () => void,
   onEnd: () => void,
-  lang: string
+  lang: string,
+  onWordChange?: (count: number) => void,
 ): Promise<() => void> {
+  const total = text.split(/\s+/).filter(Boolean).length;
   try {
     const res = await fetch("/api/tts", {
       method: "POST",
@@ -89,278 +63,256 @@ async function playTTS(
     });
     if (!res.ok) throw new Error(`TTS ${res.status}`);
     const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
+    const url  = URL.createObjectURL(blob);
     const audio = new Audio(url);
     audio.onplay = onStart;
-    audio.onended = () => { onEnd(); URL.revokeObjectURL(url); };
-    audio.onerror = () => { onEnd(); URL.revokeObjectURL(url); };
-    audio.play().catch(() => onEnd());
+    audio.ontimeupdate = () => {
+      if (!onWordChange || !isFinite(audio.duration) || audio.duration === 0) return;
+      onWordChange(Math.min(Math.ceil((audio.currentTime / audio.duration) * total), total));
+    };
+    audio.onended = () => { onWordChange?.(total); onEnd(); URL.revokeObjectURL(url); };
+    audio.onerror = () => { onWordChange?.(total); onEnd(); URL.revokeObjectURL(url); };
+    audio.play().catch(() => { onWordChange?.(total); onEnd(); });
     return () => { audio.pause(); onEnd(); URL.revokeObjectURL(url); };
   } catch {
     if (typeof window === "undefined") return () => {};
     window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = lang;
-    utter.rate = 0.92;
-    utter.pitch = 1.05;
-    utter.onstart = onStart;
-    utter.onend = onEnd;
-    utter.onerror = onEnd;
-    window.speechSynthesis.speak(utter);
-    return () => { window.speechSynthesis.cancel(); onEnd(); };
+    utter.lang  = lang;
+    utter.rate  = 0.90;
+    utter.pitch = 1.10;
+    const go = () => {
+      const voice = pickFemaleVoice(lang);
+      if (voice) utter.voice = voice;
+      utter.onstart = onStart;
+      utter.onend   = () => { onWordChange?.(total); (onEnd as () => void)(); };
+      utter.onerror = () => { onWordChange?.(total); (onEnd as () => void)(); };
+      utter.onboundary = (e: SpeechSynthesisEvent) => {
+        if (e.name === "word" && onWordChange)
+          onWordChange(text.slice(0, e.charIndex).split(/\s+/).filter(Boolean).length + 1);
+      };
+      window.speechSynthesis.speak(utter);
+    };
+    window.speechSynthesis.getVoices().length === 0
+      ? (window.speechSynthesis.onvoiceschanged = go)
+      : go();
+    return () => { window.speechSynthesis.cancel(); onWordChange?.(total); onEnd(); };
   }
 }
 
-function renderSummary(text: string) {
-  return text.split("\n").map((line, i) => {
-    if (line.startsWith("## ")) {
-      return (
-        <h3 key={i} className="mt-6 mb-2 text-base font-bold text-slate-900 dark:text-slate-100">
-          {line.slice(3)}
-        </h3>
-      );
-    }
-    if (line.startsWith("### ")) {
-      return (
-        <h4 key={i} className="mt-3 mb-1 font-semibold text-slate-800 dark:text-slate-200">
-          {line.slice(4)}
-        </h4>
-      );
-    }
-    if (line.startsWith("- ") || line.startsWith("• ")) {
-      return (
-        <li key={i} className="ml-5 list-disc text-slate-700 dark:text-slate-300">
-          {line.slice(2)}
-        </li>
-      );
-    }
-    if (line.startsWith('"') && line.endsWith('"')) {
-      return (
-        <blockquote key={i} className="my-2 border-l-4 border-teal-500 pl-3 italic text-slate-600 dark:text-slate-400">
-          {line}
-        </blockquote>
-      );
-    }
-    if (line.trim() === "") return <div key={i} className="h-1" />;
-    const boldParts = line.split(/\*\*(.*?)\*\*/g);
-    if (boldParts.length > 1) {
-      return (
-        <p key={i} className="text-slate-700 dark:text-slate-300">
-          {boldParts.map((p, j) =>
-            j % 2 === 1 ? <strong key={j}>{p}</strong> : p
-          )}
-        </p>
-      );
-    }
-    return <p key={i} className="text-slate-700 dark:text-slate-300">{line}</p>;
-  });
+/* ─── Avatar SVG face ── */
+function AvatarFace() {
+  return (
+    <svg width="108" height="108" viewBox="0 0 54 54" fill="none">
+      <ellipse cx="27" cy="52" rx="16" ry="7" fill="var(--bg3)" opacity="0.6"/>
+      <rect x="22.5" y="42" width="7" height="7" rx="1.5" fill="var(--txt3)" opacity="0.4"/>
+      <ellipse cx="27" cy="30" rx="14" ry="15" fill="var(--txt3)" opacity="0.5"/>
+      <ellipse cx="27" cy="16" rx="14" ry="7" fill="var(--border2)" opacity="0.9"/>
+      <ellipse cx="14" cy="26" rx="3" ry="8" fill="var(--border2)" opacity="0.8"/>
+      <ellipse cx="40" cy="26" rx="3" ry="8" fill="var(--border2)" opacity="0.8"/>
+      <ellipse cx="20" cy="29" rx="3" ry="3.2" fill="var(--txt)"/>
+      <ellipse cx="34" cy="29" rx="3" ry="3.2" fill="var(--txt)"/>
+      <circle cx="21" cy="28" r="1" fill="var(--bg)" opacity="0.5"/>
+      <circle cx="35" cy="28" r="1" fill="var(--bg)" opacity="0.5"/>
+      <path d="M17 25 Q20 23 23 25" stroke="var(--border2)" strokeWidth="1.2" strokeLinecap="round"/>
+      <path d="M31 25 Q34 23 37 25" stroke="var(--border2)" strokeWidth="1.2" strokeLinecap="round"/>
+      <path d="M23 40 Q27 43 31 40" stroke="var(--border2)" strokeWidth="1.2" strokeLinecap="round"/>
+    </svg>
+  );
 }
 
-/* ─────────────────────────────────────────────────────────── */
-/* SETUP SCREEN                                                */
-/* ─────────────────────────────────────────────────────────── */
-function SetupScreen({
-  onStart,
-}: {
+/* ─── SETUP ── */
+function SetupScreen({ onStart }: {
   onStart: (lang: Locale, study: StudyContext, respondent?: RespondentDetails) => void;
 }) {
-  const [lang, setLang] = useState<Locale>("en");
-  const [product, setProduct] = useState("");
+  const [lang, setLang]           = useState<Locale>("en");
+  const [product, setProduct]     = useState("");
   const [studyType, setStudyType] = useState<StudyType>("behavioral");
-  const [respondentName, setRespondentName] = useState("");
-  const [respondentAge, setRespondentAge] = useState("");
-  const [respondentGender, setRespondentGender] = useState("");
-  const [respondentDistrict, setRespondentDistrict] = useState("");
+  const [name, setName]           = useState("");
+  const [age, setAge]             = useState("");
+  const [gender, setGender]       = useState("");
+  const [district, setDistrict]   = useState("");
 
   const canStart = product.trim().length > 0;
-
   const handleStart = () => {
-    const respondent: RespondentDetails = {};
-    if (respondentName.trim())     respondent.name     = respondentName.trim();
-    if (respondentAge.trim())      respondent.age      = respondentAge.trim();
-    if (respondentGender.trim())   respondent.gender   = respondentGender.trim();
-    if (respondentDistrict.trim()) respondent.district = respondentDistrict.trim();
-    onStart(lang, { productCategory: product.trim(), studyType }, respondent);
+    const r: RespondentDetails = {};
+    if (name.trim())     r.name     = name.trim();
+    if (age.trim())      r.age      = age.trim();
+    if (gender.trim())   r.gender   = gender.trim();
+    if (district.trim()) r.district = district.trim();
+    onStart(lang, { productCategory: product.trim(), studyType }, r);
+  };
+
+  const lbl: React.CSSProperties = {
+    display: "block", fontSize: 11.5, fontWeight: 600, letterSpacing: "0.05em",
+    textTransform: "uppercase", color: "var(--txt3)", marginBottom: 9,
+  };
+  const field: React.CSSProperties = {
+    width: "100%", padding: "10px 13px", background: "var(--bg2)", color: "var(--txt)",
+    border: "1px solid var(--border)", borderRadius: 9, fontSize: 14, outline: "none",
+    fontFamily: "inherit", boxSizing: "border-box",
+  };
+  const focusField = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => {
+    e.currentTarget.style.borderColor = "var(--border2)";
+    e.currentTarget.style.boxShadow   = "0 0 0 3px rgba(0,0,0,0.06)";
+  };
+  const blurField = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => {
+    e.currentTarget.style.borderColor = "var(--border)";
+    e.currentTarget.style.boxShadow   = "none";
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-start bg-linear-to-br from-teal-950 via-teal-900 to-slate-900 px-4 py-12">
-      {/* Header branding */}
-      <div className="mb-8 text-center">
-        <span className="mb-3 inline-flex items-center gap-2 rounded-full bg-teal-800/60 px-4 py-1.5 text-xs font-medium text-teal-200 ring-1 ring-teal-700/50">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-teal-400" />
-          AI Consumer Research
-        </span>
-        <h1 className="text-3xl font-bold text-white">Ready to begin?</h1>
-        <p className="mt-2 text-sm text-teal-200/70">
-          Configure your research session below
-        </p>
-      </div>
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg2)", padding: "40px 20px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", border: "1px solid var(--border)", borderRadius: 22, overflow: "hidden", boxShadow: "var(--shadow-lg)", maxWidth: 840, width: "100%" }}>
 
-      {/* Card */}
-      <div className="w-full max-w-xl rounded-2xl bg-white/5 p-6 ring-1 ring-white/10 backdrop-blur-sm">
-        {/* Avatar preview */}
-        <div className="mb-6 flex items-center gap-4 rounded-xl bg-teal-900/40 px-4 py-3">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-teal-700 text-lg font-bold text-white shadow">
-            D
-          </div>
+        {/* ── Left panel — branded ── */}
+        <div style={{ background: "var(--inv)", color: "var(--inv-txt)", padding: "52px 40px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
           <div>
-            <p className="font-semibold text-white">Mrs Dissanayake</p>
-            <p className="text-xs text-teal-300">
-              Professional Market Researcher · Sri Lanka
+            {/* Logo */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 56, fontFamily: "var(--font-serif)", fontSize: 18, fontWeight: 500 }}>
+              <div style={{ width: 20, height: 20, borderRadius: 5, background: "var(--inv-txt)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg viewBox="0 0 12 12" fill="none" width={10} height={10}>
+                  <path d="M2 10L6 2l4 8" stroke="var(--inv)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              vinterview
+            </div>
+
+            <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 40, fontWeight: 400, letterSpacing: "-0.025em", lineHeight: 1.06, marginBottom: 18 }}>
+              Begin a<br />research<br /><em style={{ fontStyle: "italic" }}>session</em>
+            </h1>
+            <p style={{ fontSize: 14, fontWeight: 300, lineHeight: 1.75, opacity: 0.6, maxWidth: 250 }}>
+              Configure your study below. Mrs Dissanayake will adapt her approach and conduct the interview.
             </p>
           </div>
-          <div className="ml-auto flex gap-1">
-            <span className="wave-bar-1 inline-block w-1 rounded-full bg-teal-400" style={{ height: 6 }} />
-            <span className="wave-bar-2 inline-block w-1 rounded-full bg-teal-400" style={{ height: 10 }} />
-            <span className="wave-bar-3 inline-block w-1 rounded-full bg-teal-400" style={{ height: 4 }} />
-            <span className="wave-bar-4 inline-block w-1 rounded-full bg-teal-400" style={{ height: 10 }} />
-            <span className="wave-bar-5 inline-block w-1 rounded-full bg-teal-400" style={{ height: 6 }} />
-          </div>
-        </div>
 
-        {/* Language */}
-        <div className="mb-5">
-          <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-teal-300">
-            Interview Language
-          </label>
-          <div className="flex gap-2">
-            {(Object.entries(LOCALE_LABELS) as [Locale, string][]).map(
-              ([code, label]) => (
-                <button
-                  key={code}
-                  onClick={() => setLang(code)}
-                  className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${
-                    lang === code
-                      ? "bg-teal-600 text-white shadow"
-                      : "bg-white/10 text-teal-100 hover:bg-white/20"
-                  }`}
-                >
-                  {label}
-                </button>
-              )
-            )}
-          </div>
-        </div>
-
-        {/* Product category */}
-        <div className="mb-5">
-          <label
-            htmlFor="product-input"
-            className="mb-2 block text-xs font-semibold uppercase tracking-wider text-teal-300"
-          >
-            Product Category
-          </label>
-          <input
-            id="product-input"
-            type="text"
-            value={product}
-            onChange={(e) => setProduct(e.target.value)}
-            placeholder="e.g. shampoo, biscuits, mobile data plans…"
-            className="w-full rounded-lg bg-white/10 px-4 py-2.5 text-sm text-white placeholder-teal-300/50 outline-none ring-1 ring-white/20 focus:ring-teal-400 transition-all"
-          />
-        </div>
-
-        {/* Study type */}
-        <div className="mb-6">
-          <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-teal-300">
-            Study Type
-          </label>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {STUDY_OPTIONS.map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() => setStudyType(opt.id)}
-                className={`rounded-lg px-3 py-2.5 text-left transition-all ${
-                  studyType === opt.id
-                    ? "bg-teal-600 text-white ring-2 ring-teal-400 shadow-md"
-                    : "bg-white/10 text-teal-100 hover:bg-white/20"
-                }`}
-              >
-                <span className="text-base">{opt.icon}</span>
-                <p className="mt-1 text-xs font-semibold">{opt.label}</p>
-                <p className="text-[11px] opacity-70">{opt.description}</p>
-              </button>
+          {/* Feature list */}
+          <div>
+            <div style={{ height: 1, background: "rgba(255,255,255,0.1)", marginBottom: 24 }} />
+            {["Adaptive AI interviewer", "Tri-lingual support", "Auto-generated report"].map((f) => (
+              <div key={f} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, fontSize: 13, opacity: 0.55 }}>
+                <div style={{ width: 16, height: 16, borderRadius: 99, border: "1px solid rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, flexShrink: 0 }}>✓</div>
+                {f}
+              </div>
             ))}
           </div>
         </div>
 
-        {/* Respondent details */}
-        <div className="mb-6 rounded-xl border border-white/10 bg-white/5 p-4">
-          <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-teal-300">
-            Respondent Details <span className="font-normal normal-case text-teal-400/60">(optional)</span>
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-[11px] text-teal-300/70">Name</label>
-              <input
-                type="text"
-                value={respondentName}
-                onChange={(e) => setRespondentName(e.target.value)}
-                placeholder="Respondent name"
-                className="w-full rounded-lg bg-white/10 px-3 py-2 text-xs text-white placeholder-teal-300/40 outline-none ring-1 ring-white/15 focus:ring-teal-400 transition-all"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-[11px] text-teal-300/70">Age</label>
-              <input
-                type="text"
-                value={respondentAge}
-                onChange={(e) => setRespondentAge(e.target.value)}
-                placeholder="e.g. 28"
-                className="w-full rounded-lg bg-white/10 px-3 py-2 text-xs text-white placeholder-teal-300/40 outline-none ring-1 ring-white/15 focus:ring-teal-400 transition-all"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-[11px] text-teal-300/70">Gender</label>
-              <select
-                value={respondentGender}
-                onChange={(e) => setRespondentGender(e.target.value)}
-                className="w-full rounded-lg bg-white/10 px-3 py-2 text-xs text-white outline-none ring-1 ring-white/15 focus:ring-teal-400 transition-all"
-              >
-                <option value="" className="bg-slate-900">Select…</option>
-                <option value="Female" className="bg-slate-900">Female</option>
-                <option value="Male" className="bg-slate-900">Male</option>
-                <option value="Other" className="bg-slate-900">Other</option>
-              </select>
-            </div>
-            <div>
-              <label className="mb-1 block text-[11px] text-teal-300/70">District</label>
-              <input
-                type="text"
-                value={respondentDistrict}
-                onChange={(e) => setRespondentDistrict(e.target.value)}
-                placeholder="e.g. Colombo"
-                className="w-full rounded-lg bg-white/10 px-3 py-2 text-xs text-white placeholder-teal-300/40 outline-none ring-1 ring-white/15 focus:ring-teal-400 transition-all"
-              />
+        {/* ── Right panel — form ── */}
+        <div style={{ background: "var(--bg)", padding: "52px 44px", overflowY: "auto", maxHeight: "92vh" }}>
+
+          {/* Language */}
+          <div style={{ marginBottom: 22 }}>
+            <label style={lbl}>Language</label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+              {(Object.entries(LOCALE_LABELS) as [Locale, string][]).map(([code, label]) => (
+                <button key={code} onClick={() => setLang(code)} style={{
+                  padding: "10px 0", borderRadius: 9, fontSize: 13.5, fontWeight: 500, cursor: "pointer",
+                  transition: "all 0.15s", textAlign: "center", fontFamily: "inherit",
+                  background: lang === code ? "var(--inv)" : "var(--bg2)",
+                  color:      lang === code ? "var(--inv-txt)" : "var(--txt2)",
+                  border:     lang === code ? "1px solid transparent" : "1px solid var(--border)",
+                }}>{label}</button>
+              ))}
             </div>
           </div>
+
+          {/* Product */}
+          <div style={{ marginBottom: 22 }}>
+            <label style={lbl}>Product Category</label>
+            <input
+              type="text" value={product} onChange={(e) => setProduct(e.target.value)}
+              placeholder="e.g. shampoo, biscuits, mobile plans…"
+              autoFocus
+              style={field} onFocus={focusField} onBlur={blurField}
+            />
+          </div>
+
+          {/* Study framework — flex-wrap handles 5 items cleanly */}
+          <div style={{ marginBottom: 22 }}>
+            <label style={lbl}>Study Framework</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+              {STUDY_OPTIONS.map(({ id, label }) => (
+                <button key={id} onClick={() => setStudyType(id)} style={{
+                  padding: "9px 16px", borderRadius: 9, fontSize: 13.5, fontWeight: 500,
+                  cursor: "pointer", transition: "all 0.15s", fontFamily: "inherit",
+                  background: studyType === id ? "var(--inv)" : "var(--bg2)",
+                  color:      studyType === id ? "var(--inv-txt)" : "var(--txt2)",
+                  border:     studyType === id ? "1px solid transparent" : "1px solid var(--border)",
+                }}>{label}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Respondent — flat 2×2 grid, no nested box */}
+          <div style={{ marginBottom: 32 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 14 }}>
+              <User size={11} style={{ color: "var(--txt3)" }} />
+              <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--txt3)" }}>
+                Respondent
+              </span>
+              <span style={{ fontSize: 12, color: "var(--txt3)", fontWeight: 300, opacity: 0.6 }}>— optional</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 12, color: "var(--txt3)", marginBottom: 6 }}>Name</div>
+                <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" style={field} onFocus={focusField} onBlur={blurField} />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "var(--txt3)", marginBottom: 6 }}>Age</div>
+                <input type="text" value={age} onChange={(e) => setAge(e.target.value)} placeholder="e.g. 28" style={field} onFocus={focusField} onBlur={blurField} />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "var(--txt3)", marginBottom: 6 }}>Gender</div>
+                <select value={gender} onChange={(e) => setGender(e.target.value)} onFocus={focusField} onBlur={blurField}
+                  style={{ ...field, color: gender ? "var(--txt)" : "var(--txt3)", cursor: "pointer" }}
+                >
+                  <option value="">Select…</option>
+                  <option value="Female">Female</option>
+                  <option value="Male">Male</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "var(--txt3)", marginBottom: 6 }}>District</div>
+                <input type="text" value={district} onChange={(e) => setDistrict(e.target.value)} placeholder="e.g. Colombo" style={field} onFocus={focusField} onBlur={blurField} />
+              </div>
+            </div>
+          </div>
+
+          {/* Submit */}
+          <button onClick={handleStart} disabled={!canStart} style={{
+            width: "100%", padding: "14px 20px", borderRadius: 10, fontSize: 15, fontWeight: 500,
+            cursor: canStart ? "pointer" : "not-allowed", border: "none",
+            background: canStart ? "var(--inv)" : "var(--bg3)",
+            color:      canStart ? "var(--inv-txt)" : "var(--txt3)",
+            opacity: canStart ? 1 : 0.55, transition: "all 0.15s", fontFamily: "inherit",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          }}>
+            Begin Interview Session <ChevronRight size={16} />
+          </button>
         </div>
 
-        {/* Start button */}
-        <button
-          disabled={!canStart}
-          onClick={handleStart}
-          className="w-full rounded-xl bg-teal-500 py-3 text-sm font-bold text-white shadow-lg transition-all hover:bg-teal-400 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Begin Interview Session →
-        </button>
       </div>
     </div>
   );
 }
 
-/* ─────────────────────────────────────────────────────────── */
-/* SUMMARY SCREEN                                              */
-/* ─────────────────────────────────────────────────────────── */
-function SummaryScreen({
-  summary,
-  isSummarizing,
-  study,
-  respondent,
-  messages,
-  onReset,
-}: {
+/* ─── SUMMARY ── */
+function renderSummary(text: string) {
+  return text.split("\n").map((line, i) => {
+    if (line.startsWith("## "))  return <h3 key={i} style={{ marginTop: 24, marginBottom: 8, fontSize: 15, fontWeight: 600, color: "var(--txt)" }}>{line.slice(3)}</h3>;
+    if (line.startsWith("### ")) return <h4 key={i} style={{ marginTop: 12, marginBottom: 4, fontWeight: 600, color: "var(--txt)" }}>{line.slice(4)}</h4>;
+    if (line.startsWith("- ") || line.startsWith("• ")) return <li key={i} style={{ marginLeft: 20, color: "var(--txt2)", marginBottom: 4 }}>{line.slice(2)}</li>;
+    if (line.startsWith('"') && line.endsWith('"')) return <blockquote key={i} style={{ margin: "8px 0", borderLeft: "3px solid var(--border2)", paddingLeft: 12, fontStyle: "italic", color: "var(--txt2)" }}>{line}</blockquote>;
+    if (line.trim() === "") return <div key={i} style={{ height: 4 }} />;
+    const parts = line.split(/\*\*(.*?)\*\*/g);
+    if (parts.length > 1) return <p key={i} style={{ color: "var(--txt2)", marginBottom: 4 }}>{parts.map((p, j) => j % 2 === 1 ? <strong key={j}>{p}</strong> : p)}</p>;
+    return <p key={i} style={{ color: "var(--txt2)", marginBottom: 4 }}>{line}</p>;
+  });
+}
+
+function SummaryScreen({ summary, isSummarizing, study, respondent, messages, onReset }: {
   summary: string | null;
   isSummarizing: boolean;
   study?: StudyContext;
@@ -379,9 +331,7 @@ function SummaryScreen({
     const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement("a");
-    a.href     = url;
-    a.download = `interview-transcript-${Date.now()}.csv`;
-    a.click();
+    a.href = url; a.download = `interview-${Date.now()}.csv`; a.click();
     URL.revokeObjectURL(url);
   };
 
@@ -392,169 +342,170 @@ function SummaryScreen({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  return (
-    <div className="flex min-h-screen flex-col bg-slate-50 dark:bg-slate-950">
-      {/* Top bar */}
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4 dark:border-slate-800 dark:bg-slate-900">
-        <div>
-          <p className="font-semibold text-slate-900 dark:text-white">
-            Interview Complete
-          </p>
-          {study && (
-            <p className="text-xs text-slate-500">
-              {study.productCategory} ·{" "}
-              {STUDY_OPTIONS.find((s) => s.id === study.studyType)?.label}
-              {respondent?.name && ` · ${respondent.name}`}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {summary && (
-            <button
-              onClick={copySummary}
-              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-            >
-              {copied ? "✓ Copied" : "Copy Summary"}
-            </button>
-          )}
-          <button
-            onClick={exportCSV}
-            className="rounded-full border border-teal-200 bg-teal-50 px-4 py-2 text-sm font-medium text-teal-700 transition-colors hover:bg-teal-100 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-300"
-          >
-            Export CSV
-          </button>
-          <button
-            onClick={onReset}
-            className="rounded-full bg-teal-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-500"
-          >
-            + New Interview
-          </button>
-        </div>
-      </header>
+  const studyLabel = STUDY_OPTIONS.find((s) => s.id === study?.studyType)?.label;
 
-      {/* Content */}
-      <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-8">
-        {/* Respondent card */}
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "grid", gridTemplateColumns: "220px 1fr" }}>
+      {/* Sidebar */}
+      <div style={{ background: "var(--bg2)", borderRight: "1px solid var(--border)", padding: "28px 20px", display: "flex", flexDirection: "column", gap: 4, position: "sticky", top: 0, height: "100vh", overflowY: "auto" }}>
+        <div style={{ fontFamily: "var(--font-serif)", fontSize: 18, padding: "0 8px", marginBottom: 28, display: "flex", alignItems: "center", gap: 7 }}>
+          <div style={{ width: 20, height: 20, borderRadius: 5, background: "var(--inv)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <svg viewBox="0 0 12 12" fill="none" width={10} height={10}><path d="M2 10L6 2l4 8" stroke="var(--inv-txt)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </div>
+          vinterview
+        </div>
+        <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--txt3)", padding: "16px 10px 8px" }}>Session</div>
+        <button style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, fontSize: 13.5, cursor: "pointer", transition: "all 0.15s", border: "none", background: "var(--inv)", color: "var(--inv-txt)", fontFamily: "inherit", width: "100%", textAlign: "left" }}>
+          <Download size={14} /> Report
+        </button>
+        <button onClick={onReset} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, fontSize: 13.5, cursor: "pointer", transition: "all 0.15s", border: "none", background: "none", color: "var(--txt2)", fontFamily: "inherit", width: "100%", textAlign: "left" }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg3)"; e.currentTarget.style.color = "var(--txt)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = "var(--txt2)"; }}
+        >
+          <Plus size={14} /> New Interview
+        </button>
+      </div>
+
+      {/* Main */}
+      <div style={{ padding: 40, overflowY: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 36 }}>
+          <div>
+            <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 32, fontWeight: 400, letterSpacing: "-0.01em", color: "var(--txt)" }}>Research Report</h1>
+            {study && <p style={{ fontSize: 13, color: "var(--txt3)", marginTop: 4 }}>{study.productCategory} · {studyLabel}{respondent?.name ? ` · ${respondent.name}` : ""}</p>}
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            {summary && (
+              <button onClick={copySummary} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 9, border: "1px solid var(--border2)", background: "var(--bg2)", color: "var(--txt2)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
+                {copied ? <><Check size={13}/> Copied</> : <><Copy size={13}/> Copy</>}
+              </button>
+            )}
+            <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 9, border: "1px solid var(--border2)", background: "var(--bg2)", color: "var(--txt2)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
+              <Download size={13}/> Export CSV
+            </button>
+          </div>
+        </div>
+
+        {/* Respondent chips */}
         {respondent && (respondent.name || respondent.age || respondent.gender || respondent.district) && (
-          <div className="mb-6 flex flex-wrap gap-3 rounded-xl border border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
-            <p className="w-full text-xs font-semibold uppercase tracking-wider text-slate-400">Respondent</p>
-            {respondent.name     && <Chip label="Name"     value={respondent.name} />}
-            {respondent.age      && <Chip label="Age"      value={respondent.age} />}
-            {respondent.gender   && <Chip label="Gender"   value={respondent.gender} />}
-            {respondent.district && <Chip label="District" value={respondent.district} />}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16, marginBottom: 36 }}>
+            {[
+              { label: "Name",     val: respondent.name     },
+              { label: "Age",      val: respondent.age      },
+              { label: "Gender",   val: respondent.gender   },
+              { label: "District", val: respondent.district },
+            ].filter(c => c.val).map(({ label, val }) => (
+              <div key={label} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, padding: "24px" }}>
+                <div style={{ fontSize: 12, color: "var(--txt3)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, marginBottom: 10 }}>{label}</div>
+                <div style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 400, color: "var(--txt)" }}>{val}</div>
+              </div>
+            ))}
           </div>
         )}
 
         {isSummarizing ? (
-          <div className="flex flex-col items-center gap-4 py-24 text-center">
-            <div className="flex gap-1.5">
-              <span className="h-3 w-3 animate-bounce rounded-full bg-teal-500 [animation-delay:-0.3s]" />
-              <span className="h-3 w-3 animate-bounce rounded-full bg-teal-500 [animation-delay:-0.15s]" />
-              <span className="h-3 w-3 animate-bounce rounded-full bg-teal-500" />
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "80px 0", textAlign: "center" }}>
+            <div style={{ display: "flex", gap: 6 }}>
+              <span className="td" /><span className="td td-2" /><span className="td td-3" />
             </div>
-            <p className="text-sm text-slate-500">
-              Generating research summary…
-            </p>
+            <p style={{ fontSize: 14, color: "var(--txt3)" }}>Generating research summary…</p>
           </div>
         ) : summary ? (
-          <div>
-            <div className="mb-6 rounded-xl bg-teal-50 px-5 py-4 ring-1 ring-teal-200 dark:bg-teal-950/30 dark:ring-teal-800">
-              <p className="text-xs font-semibold uppercase tracking-wider text-teal-700 dark:text-teal-400">
-                Research Report
-              </p>
-              <p className="mt-0.5 text-sm text-teal-800 dark:text-teal-300">
-                {study?.productCategory} — {STUDY_OPTIONS.find((s) => s.id === study?.studyType)?.label}
-              </p>
-            </div>
-            <div className="prose-sm max-w-none rounded-xl bg-white p-6 ring-1 ring-slate-200 dark:bg-slate-900 dark:ring-slate-800">
-              {renderSummary(summary)}
-            </div>
+          <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 14, padding: 32 }}>
+            {renderSummary(summary)}
           </div>
         ) : (
-          <div className="py-24 text-center text-slate-500">
-            Summary unavailable. The interview data may not have been processed.
-          </div>
+          <p style={{ padding: "80px 0", textAlign: "center", fontSize: 14, color: "var(--txt3)" }}>Summary unavailable.</p>
         )}
-      </main>
+      </div>
     </div>
   );
 }
 
-function Chip({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs dark:bg-slate-800">
-      <span className="text-slate-400">{label}:</span>
-      <span className="font-medium text-slate-700 dark:text-slate-200">{value}</span>
-    </div>
-  );
+/* ─── MAIN CHAT (Room) ── */
+export interface PreConfig {
+  studyType: StudyType;
+  language: Locale;
+  productCategory: string;
+  respondentName?: string;
 }
 
-/* ─────────────────────────────────────────────────────────── */
-/* MAIN COMPONENT                                              */
-/* ─────────────────────────────────────────────────────────── */
-export default function ChatInterface() {
-  const [input, setInput] = useState("");
-  const [isSpeaking, setIsSpeaking] = useState(false);
+export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) {
+  const [input, setInput]             = useState("");
+  const [isSpeaking, setIsSpeaking]   = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [micSupported, setMicSupported] = useState(false);
+  const [revealedWords, setRevealedWords] = useState(-1);
+  const [seconds, setSeconds]         = useState(0);
 
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const bottomRef      = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
-  const stopAudioRef = useRef<(() => void) | null>(null);
+  const stopAudioRef   = useRef<(() => void) | null>(null);
+  const taRef          = useRef<HTMLTextAreaElement>(null);
+  const autoStarted    = useRef(false);
 
   const {
-    messages,
-    status,
-    isLoading,
-    isSummarizing,
-    language,
-    study,
-    respondent,
-    summary,
-    showClosingBanner,
-    startInterview,
-    sendUserMessage,
-    endInterview,
-    reset,
+    messages, status, isLoading, isSummarizing,
+    language, study, respondent, summary,
+    showClosingBanner, startInterview, sendUserMessage,
+    endInterview, reset,
   } = useInterviewStore();
 
   useEffect(() => {
-    if (
-      typeof window !== "undefined" &&
-      (window.SpeechRecognition || window.webkitSpeechRecognition)
-    ) {
+    if (typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition))
       startTransition(() => setMicSupported(true));
-    }
   }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
-  const speak = useCallback(
-    async (text: string) => {
-      stopAudioRef.current?.();
-      stopAudioRef.current = null;
-      const cleanup = await playTTS(
-        text,
-        () => setIsSpeaking(true),
-        () => setIsSpeaking(false),
-        LOCALE_BCP47[language]
-      );
-      stopAudioRef.current = cleanup;
-    },
-    [language]
-  );
+  useEffect(() => {
+    if (status !== "active") return;
+    const id = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [status]);
+
+  /* Auto-start when preConfig is provided (respondent session link flow) */
+  useEffect(() => {
+    if (!preConfig || status !== "idle" || autoStarted.current) return;
+    autoStarted.current = true;
+    const respondentDetails: RespondentDetails = {};
+    if (preConfig.respondentName) respondentDetails.name = preConfig.respondentName;
+    startInterview(
+      preConfig.language,
+      { productCategory: preConfig.productCategory, studyType: preConfig.studyType },
+      respondentDetails,
+    );
+  }, [preConfig, status, startInterview]);
+
+  const timerStr = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+
+  const speak = useCallback(async (text: string) => {
+    stopAudioRef.current?.();
+    stopAudioRef.current = null;
+    setRevealedWords(0);
+    const cleanup = await playTTS(
+      text,
+      () => setIsSpeaking(true),
+      () => { setIsSpeaking(false); setRevealedWords(-1); },
+      LOCALE_BCP47[language],
+      (count) => setRevealedWords(count),
+    );
+    stopAudioRef.current = cleanup;
+  }, [language]);
 
   const lastAssistantMsg = messages.filter((m) => m.role === "assistant").at(-1);
-  const spokenRef = useRef<string>("");
+  const spokenRef = useRef<number>(-1);
+
   useEffect(() => {
-    if (lastAssistantMsg && lastAssistantMsg.content !== spokenRef.current) {
-      spokenRef.current = lastAssistantMsg.content;
+    if (!lastAssistantMsg?.content || isLoading) return;
+    const idx = messages.length - 1;
+    if (spokenRef.current !== idx) {
+      spokenRef.current = idx;
       speak(lastAssistantMsg.content);
     }
-  }, [lastAssistantMsg, speak]);
+  }, [lastAssistantMsg, isLoading, messages.length, speak]);
 
   const handleSend = async () => {
     const text = input.trim();
@@ -564,275 +515,215 @@ export default function ChatInterface() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
   const handleMic = () => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      return;
-    }
-    if (isLoading) return; // don't start while AI is responding
+    if (isListening) { recognitionRef.current?.stop(); return; }
+    if (isLoading) return;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
-    const recognition = new SR();
-    recognition.lang = LOCALE_BCP47[language];
-    recognition.continuous = false;
-    recognition.interimResults = false;
-
-    /* Capture transcript in closure so onend sees the latest value */
+    const rec = new SR();
+    rec.lang = LOCALE_BCP47[language];
+    rec.continuous = false;
+    rec.interimResults = false;
     let captured = "";
-
-    recognition.onstart = () => setIsListening(true);
-    recognition.onresult = (event: { results: { [x: number]: { [x: number]: { transcript: string } } } }) => {
-      captured = event.results[0]?.[0]?.transcript ?? "";
-      setInput(captured); /* show briefly in input */
+    rec.onstart  = () => setIsListening(true);
+    rec.onresult = (e: { results: { [x: number]: { [x: number]: { transcript: string } } } }) => {
+      captured = e.results[0]?.[0]?.transcript ?? "";
+      setInput(captured);
     };
-    recognition.onerror = () => {
+    rec.onerror  = () => { setIsListening(false); captured = ""; };
+    rec.onend    = () => {
       setIsListening(false);
-      captured = "";
+      if (captured.trim()) { setInput(""); sendUserMessage(captured.trim()); }
     };
-    recognition.onend = () => {
-      setIsListening(false);
-      if (captured.trim()) {
-        setInput(""); /* clear field */
-        sendUserMessage(captured.trim()); /* auto-send */
-      }
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
+    recognitionRef.current = rec;
+    rec.start();
   };
 
-  const messageCount = messages.length;
-  const progressPct = Math.min(100, Math.round((messageCount / 20) * 100));
-  const progressLabel =
-    messageCount <= 2
-      ? "Introduction"
-      : messageCount <= 6
-      ? "Background"
-      : messageCount <= 12
-      ? "Deep Dive"
-      : "Insights Capture";
+  /* Status state */
+  const statusLabel = isSpeaking ? "Speaking" : isLoading ? "Thinking" : isListening ? "Listening" : "Ready";
+  const statusDotStyle: React.CSSProperties = {
+    width: 6, height: 6, borderRadius: "50%", transition: "all 0.3s",
+    background: isSpeaking ? "var(--txt)" : isLoading ? "#d97706" : isListening ? "#16a34a" : "var(--txt3)",
+    animation: isSpeaking ? "blink 0.7s infinite" : isLoading ? "blink 1.1s infinite" : "none",
+  };
 
-  /* ── Render states ── */
-  if (status === "idle") {
-    return <SetupScreen onStart={startInterview} />;
-  }
-
-  if (status === "finished") {
-    return (
-      <SummaryScreen
-        summary={summary}
-        isSummarizing={isSummarizing}
-        study={study}
-        respondent={respondent}
-        messages={messages}
-        onReset={reset}
-      />
-    );
-  }
-
-  /* ── Active interview ── */
-  return (
-    <div className="flex h-screen flex-col bg-slate-100 dark:bg-slate-950">
-      {/* Header */}
-      <header className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:px-6">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-700 text-sm font-bold text-white">
-            D
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-slate-900 dark:text-white">
-              Mrs Dissanayake
-            </p>
-            <p className="text-xs text-slate-400">
-              {isSpeaking ? "Speaking…" : isLoading ? "Thinking…" : "Consumer Research Interview"}
-            </p>
-          </div>
-        </div>
-
-        {/* Progress */}
-        <div className="hidden sm:flex flex-col items-center gap-1">
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <span>{progressLabel}</span>
-            <span className="text-slate-300">·</span>
-            <span>{progressPct}%</span>
-          </div>
-          <div className="h-1.5 w-40 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-            <div
-              className="h-full rounded-full bg-teal-500 transition-all duration-700"
-              style={{ width: `${progressPct}%` }}
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="hidden text-xs text-slate-400 sm:block">
-            {LOCALE_LABELS[language]}
-          </span>
-          {isSpeaking && (
-            <span className="flex items-center gap-1 rounded-full bg-teal-50 px-2 py-1 text-xs text-teal-700 dark:bg-teal-950 dark:text-teal-300">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-teal-500" />
-              Speaking
-            </span>
-          )}
-          <button
-            onClick={endInterview}
-            className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-red-50 hover:text-red-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
-          >
-            End & Get Summary
-          </button>
-        </div>
-      </header>
-
-      {/* Body */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Avatar sidebar */}
-        <aside className="hidden w-64 shrink-0 flex-col items-center justify-between border-r border-slate-200 bg-linear-to-b from-teal-900 to-slate-900 p-5 dark:border-slate-800 lg:flex">
-          <div className="w-full flex-1">
-            <div className="relative h-56 w-full overflow-hidden rounded-2xl">
-              {isSpeaking && (
-                <div className="speak-ring pointer-events-none absolute inset-0 rounded-2xl ring-2 ring-teal-400/60 z-10" />
-              )}
-              <Avatar3D isSpeaking={isSpeaking} />
-            </div>
-
-            {/* Waveform */}
-            <div className="mt-3 flex items-end justify-center gap-1 h-6">
-              {isSpeaking ? (
-                <>
-                  <span className="wave-bar-1 inline-block w-1.5 rounded-full bg-teal-400" style={{ height: 6 }} />
-                  <span className="wave-bar-2 inline-block w-1.5 rounded-full bg-teal-400" style={{ height: 10 }} />
-                  <span className="wave-bar-3 inline-block w-1.5 rounded-full bg-teal-400" style={{ height: 4 }} />
-                  <span className="wave-bar-4 inline-block w-1.5 rounded-full bg-teal-400" style={{ height: 10 }} />
-                  <span className="wave-bar-5 inline-block w-1.5 rounded-full bg-teal-400" style={{ height: 6 }} />
-                </>
-              ) : isLoading ? (
-                <span className="text-xs text-teal-400/60 animate-pulse">processing…</span>
-              ) : (
-                <span className="text-xs text-teal-500/40">listening</span>
-              )}
-            </div>
-          </div>
-
-          <div className="w-full text-center">
-            <p className="font-semibold text-white text-sm">Mrs Dissanayake</p>
-            <p className="text-xs text-teal-300/70 mt-0.5">Market Research Interviewer</p>
-            {study && (
-              <div className="mt-3 rounded-lg bg-teal-800/40 px-3 py-2 text-left ring-1 ring-teal-700/30">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-teal-400">
-                  Study
-                </p>
-                <p className="text-xs text-teal-100 mt-0.5 font-medium">
-                  {study.productCategory}
-                </p>
-                <p className="text-[11px] text-teal-300/70 mt-0.5">
-                  {STUDY_OPTIONS.find((s) => s.id === study.studyType)?.label}
-                </p>
-              </div>
-            )}
-          </div>
-        </aside>
-
-        {/* Chat area */}
-        <main className="flex flex-1 flex-col overflow-hidden">
-          {/* Closing banner */}
-          {showClosingBanner && (
-            <div className="shrink-0 flex items-center justify-between bg-teal-50 border-b border-teal-200 px-5 py-3 dark:bg-teal-950/40 dark:border-teal-800">
-              <p className="text-sm text-teal-800 dark:text-teal-300">
-                ✓ Interview concluded — ready for your research summary.
-              </p>
-              <button
-                onClick={endInterview}
-                className="ml-4 rounded-full bg-teal-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-teal-500 transition-colors"
-              >
-                View Summary →
-              </button>
-            </div>
-          )}
-
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
-            <div className="mx-auto flex max-w-2xl flex-col gap-4">
-              {messages.map((msg, i) => (
-                <MessageBubble key={i} message={msg} />
-              ))}
-              {isLoading && (
-                <div className="flex items-end gap-2.5">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-700 text-xs font-bold text-white">
-                    D
-                  </div>
-                  <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-md bg-white px-4 py-3 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700">
-                    <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.3s]" />
-                    <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:-0.15s]" />
-                    <span className="h-2 w-2 animate-bounce rounded-full bg-slate-400" />
-                  </div>
-                </div>
-              )}
-              <div ref={bottomRef} />
-            </div>
-          </div>
-
-          {/* Input bar */}
-          <div className="shrink-0 border-t border-slate-200 bg-white px-4 py-4 dark:border-slate-800 dark:bg-slate-900 sm:px-6">
-            <div className="mx-auto flex max-w-2xl items-end gap-2">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Type your answer… (Enter to send)"
-                rows={1}
-                disabled={isLoading}
-                className="flex-1 resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-400 dark:border-slate-700 dark:bg-slate-800 dark:text-white disabled:opacity-50"
-              />
-              {micSupported && (
-                <button
-                  onClick={handleMic}
-                  aria-label={isListening ? "Stop recording" : "Start recording"}
-                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-all ${
-                    isListening
-                      ? "animate-pulse border-red-400 bg-red-50 text-red-500"
-                      : "border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400"
-                  }`}
-                >
-                  <MicIcon />
-                </button>
-              )}
-              <button
-                onClick={handleSend}
-                disabled={isLoading || !input.trim()}
-                aria-label="Send"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-white transition-colors hover:bg-teal-500 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <SendIcon />
-              </button>
-            </div>
-          </div>
-        </main>
+  if (status === "idle" && !preConfig) return <SetupScreen onStart={startInterview} />;
+  if (status === "idle") return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)" }}>
+      <div style={{ display: "flex", gap: 6 }}>
+        <span className="td" /><span className="td td-2" /><span className="td td-3" />
       </div>
     </div>
   );
-}
+  if (status === "finished") return <SummaryScreen summary={summary} isSummarizing={isSummarizing} study={study} respondent={respondent} messages={messages} onReset={reset} />;
 
-function MicIcon() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-      <line x1="12" x2="12" y1="19" y2="22" />
-    </svg>
-  );
-}
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 400px", height: "100vh", overflow: "hidden" }}>
 
-function SendIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-      <path d="m22 2-7 20-4-9-9-4Z" />
-      <path d="M22 2 11 13" />
-    </svg>
+      {/* ── LEFT: av-side ── */}
+      <div style={{ display: "flex", flexDirection: "column", borderRight: "1px solid var(--border)", position: "relative", overflow: "hidden", background: "var(--bg2)" }}>
+        {/* radial bg */}
+        <div aria-hidden style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(ellipse 70% 60% at 50% 55%, var(--bg3) 0%, transparent 70%)" }} />
+
+        {/* Topbar */}
+        <div style={{ position: "relative", zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 26px", borderBottom: "1px solid var(--border)", background: "var(--bg)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 11px", borderRadius: 99, background: "rgba(22,163,74,0.1)", border: "1px solid rgba(22,163,74,0.25)", fontSize: 11, fontWeight: 600, color: "#16a34a", letterSpacing: "0.05em" }}>
+              <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#16a34a", animation: "blink 1.6s infinite", display: "inline-block" }} />
+              LIVE
+            </div>
+            <span style={{ fontSize: 13, color: "var(--txt2)" }}>{timerStr}</span>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {/* settings icon btn */}
+            <button
+              title="Settings"
+              style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--txt2)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg3)"; e.currentTarget.style.color = "var(--txt)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "var(--bg2)"; e.currentTarget.style.color = "var(--txt2)"; }}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.3"/><path d="M7 1v1.5M7 11.5V13M1 7h1.5M11.5 7H13M2.93 2.93l1.06 1.06M10.01 10.01l1.06 1.06M2.93 11.07l1.06-1.06M10.01 3.99l1.06-1.06" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
+            </button>
+            {/* leave (danger) */}
+            <button
+              title="End session"
+              onClick={endInterview}
+              style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg2)", color: "var(--txt2)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.08)"; e.currentTarget.style.color = "#ef4444"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.25)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "var(--bg2)"; e.currentTarget.style.color = "var(--txt2)"; e.currentTarget.style.borderColor = "var(--border)"; }}
+            >
+              <PhoneOff size={13} />
+            </button>
+          </div>
+        </div>
+
+        {/* Stage */}
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", position: "relative", zIndex: 1 }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 26 }}>
+            {/* Avatar circle + rings */}
+            <div style={{ position: "relative" }}>
+              <div className={`av-ring${isSpeaking ? " speaking" : ""}`} />
+              <div className={`av-ring-2${isSpeaking ? " speaking" : ""}`} />
+              <div style={{ width: 192, height: 192, borderRadius: "50%", background: "var(--bg)", border: "1.5px solid var(--border2)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "var(--shadow-lg)", overflow: "hidden", position: "relative" }}>
+                <AvatarFace />
+                <div aria-hidden style={{ position: "absolute", inset: 0, borderRadius: "50%", background: "radial-gradient(ellipse at 50% 20%, var(--bg3) 0%, transparent 55%)", pointerEvents: "none" }} />
+              </div>
+            </div>
+
+            {/* Name & role */}
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 17, fontWeight: 500, letterSpacing: "-0.01em", marginBottom: 4, color: "var(--txt)" }}>Mrs Dissanayake</div>
+              <div style={{ fontSize: 13, color: "var(--txt2)", fontWeight: 300 }}>Market Research Interviewer</div>
+            </div>
+
+            {/* Waveform */}
+            <div style={{ display: "flex", alignItems: "center", gap: 3, height: 22, opacity: isSpeaking ? 1 : 0.3, transition: "opacity 0.3s" }}>
+              <span className="wb wb-1" /><span className="wb wb-2" /><span className="wb wb-3" />
+              <span className="wb wb-4" /><span className="wb wb-5" /><span className="wb wb-6" /><span className="wb wb-7" />
+            </div>
+
+            {/* Status pill */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 18px", borderRadius: 99, background: "var(--bg)", border: "1px solid var(--border)", fontSize: 12.5, color: "var(--txt2)" }}>
+              <span style={statusDotStyle} />
+              {statusLabel}
+            </div>
+
+            {/* Study info */}
+            {study && (
+              <div style={{ padding: "10px 16px", borderRadius: 10, background: "var(--bg)", border: "1px solid var(--border)", maxWidth: 220, textAlign: "center" }}>
+                <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--txt3)", marginBottom: 4 }}>Active Study</div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: "var(--txt)" }}>{study.productCategory}</div>
+                <div style={{ fontSize: 11.5, color: "var(--txt3)", marginTop: 2 }}>{STUDY_OPTIONS.find((s) => s.id === study.studyType)?.label}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── RIGHT: chat-side ── */}
+      <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--bg)" }}>
+        {/* Chat header */}
+        <div style={{ padding: "17px 22px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--txt)" }}>Transcript</div>
+          <div style={{ fontSize: 12, color: "var(--txt3)", marginTop: 2 }}>
+            {LOCALE_LABELS[language]} · {STUDY_OPTIONS.find((s) => s.id === study?.studyType)?.label ?? "Interview"}
+          </div>
+        </div>
+
+        {/* Closing banner */}
+        {showClosingBanner && (
+          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--border)", background: "var(--bg2)", padding: "10px 18px" }}>
+            <p style={{ fontSize: 13, color: "var(--txt2)", fontWeight: 300 }}>Interview concluded — view your research summary.</p>
+            <button onClick={endInterview}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, border: "none", background: "var(--inv)", color: "var(--inv-txt)", fontSize: 12.5, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
+            >
+              View Summary <ChevronRight size={13} />
+            </button>
+          </div>
+        )}
+
+        {/* Messages */}
+        <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 4, scrollbarWidth: "thin", scrollbarColor: "var(--border) transparent" }}>
+          {messages.map((msg, i) => {
+            const isLastAssistant = msg.role === "assistant" && i === messages.length - 1;
+            return (
+              <MessageBubble
+                key={i}
+                message={msg}
+                revealedWords={isLastAssistant && revealedWords >= 0 ? revealedWords : undefined}
+              />
+            );
+          })}
+
+          {isLoading && (
+            <div style={{ alignSelf: "flex-start" }}>
+              <span style={{ fontSize: 11, color: "var(--txt3)", textTransform: "uppercase", letterSpacing: "0.06em", padding: "0 12px", display: "block", margin: "12px 0 6px" }}>Mrs Dissanayake</span>
+              <div className="typing-indicator show" style={{ display: "flex", gap: 5, alignItems: "center", padding: "12px 14px", background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 14, borderBottomLeftRadius: 4, width: "fit-content" }}>
+                <span className="td" /><span className="td td-2" /><span className="td td-3" />
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Input */}
+        <div style={{ padding: 14, borderTop: "1px solid var(--border)", flexShrink: 0 }}>
+          <div
+            style={{ display: "flex", alignItems: "flex-end", gap: 8, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, padding: "8px 8px 8px 14px", transition: "border-color 0.18s" }}
+            onFocusCapture={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--txt2)"; }}
+            onBlurCapture={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "var(--border)"; }}
+          >
+            <textarea
+              ref={taRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Type your response…"
+              rows={1}
+              disabled={isLoading}
+              style={{ flex: 1, background: "none", border: "none", outline: "none", color: "var(--txt)", fontFamily: "inherit", fontSize: 13.5, fontWeight: 300, lineHeight: 1.5, resize: "none", maxHeight: 100, paddingTop: 3, opacity: isLoading ? 0.5 : 1 }}
+            />
+            {micSupported && (
+              <button onClick={handleMic} aria-label={isListening ? "Stop" : "Speak"}
+                style={{ width: 34, height: 34, borderRadius: 9, border: isListening ? "none" : "1px solid var(--border)", background: isListening ? "var(--inv)" : "var(--bg3)", color: isListening ? "var(--inv-txt)" : "var(--txt2)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s", flexShrink: 0, animation: isListening ? "blink 1s infinite" : "none" }}
+              >
+                {isListening ? <MicOff size={14} /> : <Mic size={14} />}
+              </button>
+            )}
+            <button onClick={handleSend} disabled={isLoading || !input.trim()} aria-label="Send"
+              style={{ width: 34, height: 34, borderRadius: 9, border: "none", background: "var(--inv)", color: "var(--inv-txt)", cursor: isLoading || !input.trim() ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s", flexShrink: 0, opacity: isLoading || !input.trim() ? 0.4 : 1 }}
+              onMouseEnter={(e) => { if (!isLoading && input.trim()) e.currentTarget.style.opacity = "0.8"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = isLoading || !input.trim() ? "0.4" : "1"; }}
+            >
+              <Send size={14} />
+            </button>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--txt3)", textAlign: "center", marginTop: 7 }}>Enter to send · Shift+Enter for new line</div>
+        </div>
+      </div>
+    </div>
   );
 }

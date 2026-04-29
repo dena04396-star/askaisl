@@ -4,7 +4,8 @@ export async function sendMessage(
   messages: ChatMessage[],
   language: Locale,
   sessionId?: string,
-  study?: StudyContext
+  study?: StudyContext,
+  onChunk?: (chunk: string) => void
 ): Promise<string> {
   const res = await fetch("/api/chat", {
     method: "POST",
@@ -17,6 +18,40 @@ export async function sendMessage(
     throw new Error(error ?? "Request failed");
   }
 
-  const { reply } = await res.json();
-  return reply as string;
+  /* Handle streaming response */
+  if (!res.body) throw new Error("No response body");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let fullReply = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const chunk = decoder.decode(value);
+    const lines = chunk.split("\n");
+
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        try {
+          const json = JSON.parse(line.slice(6));
+          if (json.chunk) {
+            fullReply += json.chunk;
+            onChunk?.(json.chunk);
+          }
+          if (json.done) {
+            return fullReply;
+          }
+          if (json.error) {
+            throw new Error(json.error);
+          }
+        } catch (e) {
+          /* Ignore parse errors for empty lines */
+        }
+      }
+    }
+  }
+
+  return fullReply;
 }

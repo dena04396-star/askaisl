@@ -44,7 +44,7 @@ export function getModelName(): string {
   if (process.env.AI_MODEL) return process.env.AI_MODEL;
   if (process.env.OPENROUTER_API_KEY) return "deepseek/deepseek-chat";
   if (process.env.DEEPSEEK_API_KEY) return "deepseek-chat";
-  return "gpt-4o";
+  return "gpt-4o-mini"; /* 3-5× faster than gpt-4o; sufficient for interview Q&A */
 }
 
 let _client: OpenAI | null = null;

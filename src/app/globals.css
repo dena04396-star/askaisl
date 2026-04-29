@@ -1,83 +1,175 @@
 @import "tailwindcss";
 
+/* ── Tokens (matches vinterview.html exactly) ── */
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
-  --surface: #ffffff;
-  --border: #e2e8f0;
-  --muted: #94a3b8;
-  --primary: #0f766e;
-  --primary-light: #ccfbf1;
-  --accent: #b45309;
+  --bg:      #ffffff;
+  --bg2:     #f7f7f7;
+  --bg3:     #efefef;
+  --border:  #e4e4e4;
+  --border2: #d0d0d0;
+  --txt:     #0a0a0a;
+  --txt2:    #555560;
+  --txt3:    #999aaa;
+  --inv:     #0a0a0a;
+  --inv-txt: #ffffff;
+  --shadow:  0 1px 3px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.06);
+  --shadow-lg: 0 8px 40px rgba(0,0,0,0.10);
 }
 
+[data-theme="dark"], .dark {
+  --bg:      #0a0a0a;
+  --bg2:     #111111;
+  --bg3:     #1a1a1a;
+  --border:  #252525;
+  --border2: #333333;
+  --txt:     #f0f0f0;
+  --txt2:    #888898;
+  --txt3:    #444455;
+  --inv:     #f0f0f0;
+  --inv-txt: #0a0a0a;
+  --shadow:  0 1px 3px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.3);
+  --shadow-lg: 0 8px 40px rgba(0,0,0,0.5);
+}
+
+/* ── Theme wiring ── */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: var(--bg);
+  --color-foreground: var(--txt);
+  --font-sans: var(--font-dm-sans), 'DM Sans', system-ui, sans-serif;
+  --font-serif: var(--font-cormorant), 'Cormorant Garamond', Georgia, serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0b1120;
-    --foreground: #f1f5f9;
-    --surface: #111827;
-    --border: #1e293b;
-    --muted: #475569;
-    --primary: #14b8a6;
-    --primary-light: #042f2e;
-    --accent: #fbbf24;
-  }
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html {
-  scroll-behavior: smooth;
-}
+/* ── Base ── */
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--txt);
+  font-family: var(--font-dm-sans), 'DM Sans', system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 999px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
+/* ── Scrollbar ── */
+::-webkit-scrollbar       { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border2); }
+
+/* ── Animations (from vinterview.html) ── */
+@keyframes blink    { 0%,100%{opacity:1} 50%{opacity:0.2} }
+@keyframes breathe  { 0%,100%{transform:scale(1);opacity:0.5} 50%{transform:scale(1.02);opacity:1} }
+@keyframes speak-ring { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
+@keyframes wv       { 0%,100%{transform:scaleY(0.3);opacity:0.3} 50%{transform:scaleY(1);opacity:1} }
+@keyframes td       { 0%,100%{opacity:0.3;transform:scale(0.8)} 50%{opacity:1;transform:scale(1)} }
+@keyframes msgIn    { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+@keyframes mouthOpen { 0%,100%{d:path("M22 38 Q27 40 32 38")} 50%{d:path("M22 38 Q27 44 32 38")} }
+@keyframes marquee  { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+
+/* ── Avatar rings ── */
+.av-ring         { animation: breathe 3s ease-in-out infinite; }
+.av-ring-2       { animation: breathe 3.5s ease-in-out infinite 0.4s; }
+.av-ring.speaking   { animation: speak-ring 0.7s ease-in-out infinite; }
+.av-ring-2.speaking { animation: speak-ring 0.7s ease-in-out infinite 0.15s; }
+
+/* ── Waveform bars ── */
+.wb   { width: 3px; border-radius: 3px; background: var(--txt2); }
+.wb-1 { height: 7px;  animation: wv 0.9s ease-in-out infinite 0s; }
+.wb-2 { height: 14px; animation: wv 0.9s ease-in-out infinite 0.1s; }
+.wb-3 { height: 20px; animation: wv 0.9s ease-in-out infinite 0.2s; }
+.wb-4 { height: 14px; animation: wv 0.9s ease-in-out infinite 0.3s; }
+.wb-5 { height: 7px;  animation: wv 0.9s ease-in-out infinite 0.4s; }
+.wb-6 { height: 16px; animation: wv 0.9s ease-in-out infinite 0.1s; }
+.wb-7 { height: 10px; animation: wv 0.9s ease-in-out infinite 0.25s; }
+
+/* ── Typing dots ── */
+.td   { width: 5px; height: 5px; border-radius: 50%; background: var(--txt3); animation: td 1.2s ease-in-out infinite; }
+.td-2 { animation-delay: 0.2s; }
+.td-3 { animation-delay: 0.4s; }
+
+/* ── Bubble entry ── */
+.bubble-in { animation: msgIn 0.25s ease-out; }
+
+/* ── Karaoke highlight ── */
+mark.karaoke {
+  background: rgba(255, 220, 0, 0.55);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 2px;
+  font-style: normal;
 }
 
-/* Speaking pulse ring */
-@keyframes speakPulse {
-  0%, 100% { opacity: 0.4; transform: scale(1); }
-  50% { opacity: 0.8; transform: scale(1.04); }
+/* ── Vinterview button utilities ── */
+.vt-btn-ghost {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 9px 20px; border-radius: 9px; font-size: 14px; font-weight: 500;
+  cursor: pointer; border: 1px solid var(--border); background: transparent;
+  color: var(--txt2); transition: all 0.15s; text-decoration: none;
+  white-space: nowrap; font-family: inherit;
 }
-
-.speak-ring {
-  animation: speakPulse 1.2s ease-in-out infinite;
+.vt-btn-ghost:hover { background: var(--bg2); color: var(--txt); border-color: var(--border2); }
+.vt-btn-solid {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 9px 20px; border-radius: 9px; font-size: 14px; font-weight: 500;
+  cursor: pointer; border: none; background: var(--inv); color: var(--inv-txt);
+  transition: all 0.15s; text-decoration: none; white-space: nowrap; font-family: inherit;
 }
+.vt-btn-solid:hover { opacity: 0.84; transform: translateY(-1px); }
+.vt-btn-solid:active { transform: translateY(0); }
+.vt-btn-lg { padding: 13px 28px !important; font-size: 15px !important; border-radius: 11px !important; }
+.vt-btn-banner {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--bg); color: var(--txt); padding: 14px 32px; border-radius: 11px;
+  font-size: 15px; font-weight: 500; border: none; cursor: pointer;
+  flex-shrink: 0; transition: all 0.15s; text-decoration: none; font-family: inherit;
+}
+.vt-btn-banner:hover { opacity: 0.88; transform: translateY(-1px); }
 
-/* Waveform bars */
-@keyframes bar1 { 0%,100%{height:6px} 50%{height:18px} }
-@keyframes bar2 { 0%,100%{height:10px} 50%{height:24px} }
-@keyframes bar3 { 0%,100%{height:4px} 50%{height:14px} }
+/* ── Nav ── */
+.vt-nav-link {
+  padding: 6px 14px; border-radius: 8px; font-size: 14px;
+  color: var(--txt2); cursor: pointer; background: none; border: none;
+  transition: color 0.15s, background 0.15s; font-family: inherit;
+}
+.vt-nav-link:hover { color: var(--txt); background: var(--bg2); }
+.vt-footer-link {
+  display: block; font-size: 13.5px; color: var(--txt2);
+  padding: 4px 0; transition: color 0.15s; cursor: pointer; text-decoration: none;
+}
+.vt-footer-link:hover { color: var(--txt); }
 
-.wave-bar-1 { animation: bar1 0.9s ease-in-out infinite; }
-.wave-bar-2 { animation: bar2 0.9s ease-in-out infinite 0.15s; }
-.wave-bar-3 { animation: bar3 0.9s ease-in-out infinite 0.3s; }
-.wave-bar-4 { animation: bar2 0.9s ease-in-out infinite 0.45s; }
-.wave-bar-5 { animation: bar1 0.9s ease-in-out infinite 0.6s; }
+/* ── Marketing section hover effects ── */
+.vt-feat-card  { background: var(--bg); transition: background 0.2s; }
+.vt-feat-card:hover { background: var(--bg2); }
+
+.vt-stat-item  { transition: background 0.2s; }
+.vt-stat-item:hover { background: var(--bg2); }
+
+.vt-testi-card { transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s; }
+.vt-testi-card:hover { border-color: var(--border2); box-shadow: var(--shadow); transform: translateY(-2px); }
+
+.vt-type-card  { transition: all 0.18s; color: var(--txt); text-decoration: none; }
+.vt-type-card:hover { background: var(--inv) !important; color: var(--inv-txt) !important; border-color: transparent !important; transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+
+.vt-compare-row { transition: background 0.15s; }
+.vt-compare-row:hover { background: var(--bg2); }
+
+.vt-faq-item   { transition: background 0.15s; cursor: pointer; }
+.vt-faq-item:hover { background: var(--bg2); }
+
+.vt-press-card { border: 1px solid var(--border); border-radius: 14px; padding: 32px 28px; background: var(--bg); transition: border-color 0.2s; }
+.vt-press-card:hover { border-color: var(--border2); }
+
+/* ── Interview type card child selectors ── */
+.vt-type-icon { transition: background 0.18s, border-color 0.18s; }
+.vt-type-card:hover .vt-type-icon {
+  background: color-mix(in srgb, var(--inv-txt) 12%, transparent) !important;
+  border-color: color-mix(in srgb, var(--inv-txt) 20%, transparent) !important;
+}
+.vt-type-label { transition: color 0.18s; }
+.vt-type-card:hover .vt-type-label {
+  color: color-mix(in srgb, var(--inv-txt) 65%, transparent) !important;
+}

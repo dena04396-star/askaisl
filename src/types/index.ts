@@ -43,3 +43,15 @@ export interface RespondentDetails {
   gender?: string;
   district?: string;
 }
+
+export interface SessionRow {
+  id: string;
+  token: string;
+  title: string;
+  study_type: StudyType;
+  language: Locale;
+  product_category: string;
+  created_by: string;
+  status: "active" | "closed";
+  created_at: string;
+}

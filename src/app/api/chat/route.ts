@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runInterviewer } from "@/lib/ai/interviewer";
+import { openai, getModelName } from "@/lib/ai/openai";
+import { buildSystemPrompt } from "@/lib/ai/prompts";
 import { isValidLocale } from "@/lib/i18n/config";
 import { saveTranscript } from "@/features/transcript/transcript.service";
 import { generateId } from "@/lib/utils/helpers";
-import type { Locale, StudyContext } from "@/types";
+import type { Locale, StudyContext, ChatMessage } from "@/types";
 
 export async function POST(req: NextRequest) {
   try {
@@ -28,19 +29,73 @@ export async function POST(req: NextRequest) {
         ? study
         : undefined;
 
-    const reply = await runInterviewer(messages, locale, studyCtx);
+    const messageCount = (messages as ChatMessage[]).filter((m) => m.role === "user").length;
 
-    const sid: string =
-      typeof sessionId === "string" && sessionId ? sessionId : generateId();
-    const allMessages = [
-      ...messages,
-      { role: "assistant" as const, content: reply },
-    ];
-    saveTranscript({ sessionId: sid, messages: allMessages }).catch((err) =>
-      console.error("[/api/chat] saveTranscript error:", err)
-    );
+    /* Keep last 10 turns only — shorter context = faster first-token time */
+    const recentMessages: ChatMessage[] = (messages as ChatMessage[]).slice(-10);
 
-    return NextResponse.json({ reply });
+    /* Stream the response */
+    const stream = await openai.chat.completions.create({
+      model: getModelName(),
+      messages: [
+        { role: "system", content: buildSystemPrompt(locale, studyCtx, messageCount) },
+        ...recentMessages.map((m) => ({ role: m.role, content: m.content })),
+      ],
+      temperature: 0.65,
+      max_tokens: 200,        /* Short interview questions need ≤200 tokens */
+      frequency_penalty: 0.3, /* Prevent repetitive filler phrases */
+      stream: true,
+    });
+
+    const encoder = new TextEncoder();
+    const customStream = new ReadableStream({
+      async start(controller) {
+        let fullReply = "";
+
+        try {
+          for await (const chunk of stream) {
+            const delta = chunk.choices[0]?.delta?.content || "";
+            if (delta) {
+              fullReply += delta;
+              /* Send chunk to client via SSE */
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify({ chunk: delta })}\n\n`)
+              );
+            }
+          }
+
+          /* Signal completion and save transcript */
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`)
+          );
+
+          /* Save transcript in background */
+          const sid = typeof sessionId === "string" && sessionId ? sessionId : generateId();
+          const allMessages = [
+            ...messages,
+            { role: "assistant" as const, content: fullReply },
+          ];
+          saveTranscript({ sessionId: sid, messages: allMessages }).catch((err) =>
+            console.error("[/api/chat] saveTranscript error:", err)
+          );
+        } catch (error) {
+          console.error("[/api/chat stream error]", error);
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ error: "Stream error" })}\n\n`)
+          );
+        }
+
+        controller.close();
+      },
+    });
+
+    return new NextResponse(customStream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    });
   } catch (error) {
     console.error("[/api/chat]", error);
     return NextResponse.json(

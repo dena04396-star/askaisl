@@ -1,40 +1,56 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { getBrowserClient } from "@/lib/auth/client";
+
+function LogoMark() {
+  return (
+    <div style={{ width: 22, height: 22, borderRadius: 6, background: "var(--inv)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <svg viewBox="0 0 12 12" fill="none" width={12} height={12}>
+        <path d="M2 10L6 2l4 8" stroke="var(--inv-txt)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </div>
+  );
+}
 
 export default function Navbar() {
-  return (
-    <header className="sticky top-0 z-50 border-b border-slate-200/60 bg-white/90 backdrop-blur-md dark:border-slate-800/60 dark:bg-slate-950/90">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-        {/* Logo */}
-        <Link href="/" className="flex items-center gap-2.5 group">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-600 text-xs font-bold text-white shadow-sm transition-transform group-hover:scale-105">
-            V
-          </div>
-          <span className="text-lg font-bold tracking-tight text-slate-900 dark:text-white">
-            Vinterview
-          </span>
-        </Link>
+  const { user, loading } = useAuth();
+  const router = useRouter();
 
-        {/* Nav */}
-        <nav className="flex items-center gap-6">
-          <Link
-            href="/"
-            className="hidden text-sm text-slate-500 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-white sm:block"
-          >
-            Home
-          </Link>
-          <Link
-            href="/dashboard"
-            className="hidden text-sm text-slate-500 transition-colors hover:text-slate-900 dark:text-slate-400 dark:hover:text-white sm:block"
-          >
-            Dashboard
-          </Link>
-          <Link
-            href="/chat"
-            className="rounded-full bg-teal-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-teal-500"
-          >
-            Start Research
-          </Link>
-        </nav>
+  async function handleSignOut() {
+    await getBrowserClient().auth.signOut();
+    router.push("/");
+  }
+
+  return (
+    <header style={{ position: "sticky", top: 0, zIndex: 100, background: "var(--bg)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 52px", height: 62 }}>
+      <Link href="/" style={{ fontFamily: "var(--font-serif)", fontSize: 21, fontWeight: 500, letterSpacing: "-0.01em", color: "var(--txt)", textDecoration: "none", display: "flex", alignItems: "center", gap: 7 }}>
+        <LogoMark /> vinterview
+      </Link>
+
+      <nav style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <button className="vt-nav-link">Product</button>
+        <button className="vt-nav-link">Pricing</button>
+        <button className="vt-nav-link">Blog</button>
+      </nav>
+
+      {/* Fixed-width container prevents layout shift while loading */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 200, justifyContent: "flex-end" }}>
+        {loading ? (
+          <div style={{ width: 200, height: 34 }} />
+        ) : user ? (
+          <>
+            <Link href="/dashboard" className="vt-btn-ghost">Dashboard</Link>
+            <button className="vt-btn-solid" onClick={handleSignOut}>Sign out</button>
+          </>
+        ) : (
+          <>
+            <Link href="/login" className="vt-btn-ghost">Sign in</Link>
+            <Link href="/signup" className="vt-btn-solid">Get started</Link>
+          </>
+        )}
       </div>
     </header>
   );

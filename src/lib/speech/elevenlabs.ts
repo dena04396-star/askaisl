@@ -7,8 +7,8 @@
 
 const ELEVENLABS_BASE = "https://api.elevenlabs.io/v1";
 
-// Default voice: Alice - Clear, Engaging Educator
-const DEFAULT_VOICE_ID = "Xb7hH8MSUJpSbSDYk0k2";
+// Default voice: Sarah — warm, natural female voice (ElevenLabs premade)
+const DEFAULT_VOICE_ID = "EXAVITQu4vr4xnSDxMaL";
 
 // Voice IDs contain only alphanumeric characters and are typically 20 chars
 const VOICE_ID_RE = /^[A-Za-z0-9]{10,30}$/;
@@ -62,11 +62,11 @@ export async function streamTTS(
     },
     body: JSON.stringify({
       text,
-      model_id: "eleven_multilingual_v2",
+      model_id: "eleven_turbo_v2_5", /* fastest ElevenLabs model — ~50% lower latency */
       voice_settings: {
-        stability: options.stability ?? 0.5,
-        similarity_boost: options.similarityBoost ?? 0.75,
-        style: options.style ?? 0.0,
+        stability: options.stability ?? 0.60,
+        similarity_boost: options.similarityBoost ?? 0.85,
+        style: options.style ?? 0.20,
         use_speaker_boost: options.useSpeakerBoost ?? true,
       },
     }),

@@ -7,10 +7,13 @@ export async function runInterviewer(
   language: Locale = "en",
   study?: StudyContext
 ): Promise<string> {
+  /* Calculate how many user messages have been sent (interview turn number) */
+  const messageCount = messages.filter((m) => m.role === "user").length;
+
   const response = await openai.chat.completions.create({
     model: getModelName(),
     messages: [
-      { role: "system", content: buildSystemPrompt(language, study) },
+      { role: "system", content: buildSystemPrompt(language, study, messageCount) },
       ...messages.map((m) => ({ role: m.role, content: m.content })),
     ],
     temperature: 0.7,

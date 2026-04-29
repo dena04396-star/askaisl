@@ -51,7 +51,12 @@ export function useInterviewStore() {
       setIsLoading(true);
       setShowClosingBanner(false);
       try {
-        const raw   = await sendMessage([], lang, sessionId, ctx);
+        /* Buffer silently — message reveals in sync with TTS */
+        let streamedText = "";
+        const raw = await sendMessage([], lang, sessionId, ctx, (chunk) => {
+          streamedText += chunk;
+        });
+
         const reply = sanitize(raw);
         setMessages([{ role: "assistant", content: reply }]);
         if (detectClosing(reply)) setShowClosingBanner(true);
@@ -69,10 +74,15 @@ export function useInterviewStore() {
       setMessages(next);
       setIsLoading(true);
       try {
-        const raw   = await sendMessage(next, language, sessionId, study);
+        /* Buffer silently — message reveals in sync with TTS */
+        let streamedText = "";
+        const raw = await sendMessage(next, language, sessionId, study, (chunk) => {
+          streamedText += chunk;
+        });
+
         const reply = sanitize(raw);
-        const updated = [...next, { role: "assistant" as const, content: reply }];
-        setMessages(updated);
+        setMessages([...next, { role: "assistant", content: reply }]);
+
         if (detectClosing(reply)) setShowClosingBanner(true);
       } finally {
         setIsLoading(false);
