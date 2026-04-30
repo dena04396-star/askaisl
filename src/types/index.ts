@@ -42,6 +42,7 @@ export interface RespondentDetails {
   age?: string;
   gender?: string;
   district?: string;
+  occupation?: string;
 }
 
 export interface SessionRow {

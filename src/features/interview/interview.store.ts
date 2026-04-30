@@ -103,11 +103,24 @@ export function useInterviewStore() {
           : `Respondent: ${m.content}`
       )
       .join("\n\n");
+
+    /* Prepend respondent metadata so the summary AI has full context */
+    const meta = [
+      respondent?.name       ? `Name: ${respondent.name}`             : null,
+      respondent?.age        ? `Age: ${respondent.age}`               : null,
+      respondent?.gender     ? `Gender: ${respondent.gender}`         : null,
+      respondent?.district   ? `District: ${respondent.district}`     : null,
+      respondent?.occupation ? `Occupation: ${respondent.occupation}` : null,
+    ].filter(Boolean).join(" | ");
+
+    const fullTranscript = meta
+      ? `[Respondent Profile: ${meta}]\n\n${transcript}`
+      : transcript;
     try {
       const res = await fetch("/api/summary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript, respondent }),
+        body: JSON.stringify({ transcript: fullTranscript, respondent }),
       });
       if (res.ok) {
         const { summary: raw } = await res.json();

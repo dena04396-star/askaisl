@@ -20,13 +20,11 @@ export async function POST(req: NextRequest) {
       { voiceId, language }
     );
 
-    // Pipe the ElevenLabs audio stream directly to the client
-    return new Response(elevenResp.body, {
-      status: 200,
+    const stream = elevenResp.body;
+    return new NextResponse(stream, {
       headers: {
         "Content-Type": "audio/mpeg",
         "Transfer-Encoding": "chunked",
-        "Cache-Control": "no-store",
       },
     });
   } catch (error) {

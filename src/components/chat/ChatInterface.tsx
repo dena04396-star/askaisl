@@ -73,6 +73,7 @@ async function playTTS(
   try {
     const res = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, language: lang }) });
     if (!res.ok) throw new Error(`TTS ${res.status}`);
+    
     const url = URL.createObjectURL(await res.blob());
     const audio = new Audio(url);
 
@@ -127,14 +128,16 @@ function SetupScreen({ onStart }: {
   const [age, setAge]             = useState("");
   const [gender, setGender]       = useState("");
   const [district, setDistrict]   = useState("");
+  const [occupation, setOccupation] = useState("");
 
   const canStart = product.trim().length > 0;
   const handleStart = () => {
     const r: RespondentDetails = {};
-    if (name.trim())     r.name     = name.trim();
-    if (age.trim())      r.age      = age.trim();
-    if (gender.trim())   r.gender   = gender.trim();
-    if (district.trim()) r.district = district.trim();
+    if (name.trim())       r.name       = name.trim();
+    if (age.trim())        r.age        = age.trim();
+    if (gender.trim())     r.gender     = gender.trim();
+    if (district.trim())   r.district   = district.trim();
+    if (occupation.trim()) r.occupation = occupation.trim();
     onStart(lang, { productCategory: product.trim(), studyType }, r);
   };
 
@@ -271,7 +274,11 @@ function SetupScreen({ onStart }: {
               </div>
               <div>
                 <div style={{ fontSize: 12, color: "var(--txt3)", marginBottom: 6 }}>District</div>
-                <input type="text" value={district} onChange={(e) => setDistrict(e.target.value)} placeholder="e.g. Colombo" style={field} onFocus={focusField} onBlur={blurField} />
+                <input type="text" value={district} onChange={(e) => setDistrict(e.target.value)} placeholder="e.g. Colombo, Kandy…" style={field} onFocus={focusField} onBlur={blurField} />
+              </div>
+              <div style={{ gridColumn: "span 2" }}>
+                <div style={{ fontSize: 12, color: "var(--txt3)", marginBottom: 6 }}>Occupation</div>
+                <input type="text" value={occupation} onChange={(e) => setOccupation(e.target.value)} placeholder="e.g. Teacher, Homemaker, Entrepreneur…" style={field} onFocus={focusField} onBlur={blurField} />
               </div>
             </div>
           </div>
@@ -344,10 +351,11 @@ function SummaryScreen({ summary, isSummarizing, study, respondent, messages, on
     if (respondent) {
       const rRows = [
         ["Field", "Value"],
-        ["Name",     respondent.name     ?? ""],
-        ["Age",      respondent.age      ?? ""],
-        ["Gender",   respondent.gender   ?? ""],
-        ["District", respondent.district ?? ""],
+        ["Name",       respondent.name       ?? ""],
+        ["Age",        respondent.age        ?? ""],
+        ["Gender",     respondent.gender     ?? ""],
+        ["District",   respondent.district   ?? ""],
+        ["Occupation", respondent.occupation ?? ""],
       ];
       const rSheet = XLSX.utils.aoa_to_sheet(rRows);
       rSheet["!cols"] = [{ wch: 15 }, { wch: 30 }];
@@ -408,13 +416,14 @@ function SummaryScreen({ summary, isSummarizing, study, respondent, messages, on
         </div>
 
         {/* Respondent chips */}
-        {respondent && (respondent.name || respondent.age || respondent.gender || respondent.district) && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16, marginBottom: 36 }}>
+        {respondent && (respondent.name || respondent.age || respondent.gender || respondent.district || respondent.occupation) && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 16, marginBottom: 36 }}>
             {[
-              { label: "Name",     val: respondent.name     },
-              { label: "Age",      val: respondent.age      },
-              { label: "Gender",   val: respondent.gender   },
-              { label: "District", val: respondent.district },
+              { label: "Name",       val: respondent.name       },
+              { label: "Age",        val: respondent.age        },
+              { label: "Gender",     val: respondent.gender     },
+              { label: "District",   val: respondent.district   },
+              { label: "Occupation", val: respondent.occupation },
             ].filter(c => c.val).map(({ label, val }) => (
               <div key={label} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 12, padding: "24px" }}>
                 <div style={{ fontSize: 12, color: "var(--txt3)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600, marginBottom: 10 }}>{label}</div>
@@ -518,6 +527,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
     stopAudioRef.current?.();
     stopAudioRef.current = null;
     setRevealedWords(0);
+    
     const cleanup = await playTTS(
       text,
       () => setIsSpeaking(true),
