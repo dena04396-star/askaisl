@@ -44,7 +44,16 @@ export default function LoginPage() {
       options: { emailRedirectTo: `${window.location.origin}/dashboard` },
     });
     setBusy(false);
-    if (error) { setError(error.message); return; }
+    if (error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes("rate") || msg.includes("limit") || msg.includes("too many"))
+        setError("Too many requests — please wait a few minutes before trying again.");
+      else if (msg.includes("invalid") || msg.includes("not allowed"))
+        setError("This email address is not allowed. Please use a different one.");
+      else
+        setError(error.message);
+      return;
+    }
     setSent(true);
   }
 
@@ -67,9 +76,12 @@ export default function LoginPage() {
               <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 28, fontWeight: 400, letterSpacing: "-0.02em", color: "var(--txt)", marginBottom: 10 }}>
                 Check your email
               </h1>
-              <p style={{ fontSize: 14, color: "var(--txt2)", fontWeight: 300, lineHeight: 1.7, marginBottom: 28 }}>
+              <p style={{ fontSize: 14, color: "var(--txt2)", fontWeight: 300, lineHeight: 1.7, marginBottom: 16 }}>
                 We sent a magic link to <strong style={{ color: "var(--txt)", fontWeight: 500 }}>{email}</strong>. Click it to sign in — no password needed.
               </p>
+              <div style={{ padding: "10px 14px", borderRadius: 8, background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.2)", fontSize: 13, color: "#ca8a04", marginBottom: 24, textAlign: "left", lineHeight: 1.6 }}>
+                Can&apos;t find it? Check your <strong>Spam / Junk</strong> folder. Free accounts are limited to 3 emails per hour — if you&apos;ve tried recently, wait a few minutes.
+              </div>
               <button
                 onClick={() => { setSent(false); setEmail(""); }}
                 style={{ fontSize: 13.5, color: "var(--txt2)", background: "transparent", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: "inherit" }}

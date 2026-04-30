@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, startTransition } from "react";
-import { Mic, MicOff, Send, PhoneOff, Copy, Check, Download, Plus, ChevronRight, Globe, User } from "lucide-react";
+import { Mic, MicOff, Send, PhoneOff, Copy, Check, Download, Plus, ChevronRight, User } from "lucide-react";
+import * as XLSX from "xlsx";
 import MessageBubble from "./MessageBubble";
 import { Button } from "@/components/ui/Button";
 import { useInterviewStore } from "@/features/interview/interview.store";
 import type { Locale, StudyType, StudyContext, RespondentDetails } from "@/types";
-import AvatarPortrait from "@/components/avatar/AvatarPortrait";
+import dynamic from "next/dynamic";
+const Avatar3D = dynamic(() => import("@/components/avatar/Avatar3D"), { ssr: false });
 
 declare global {
   interface Window {
@@ -30,43 +32,79 @@ const STUDY_OPTIONS: { id: StudyType; label: string; description: string }[] = [
 
 
 /* ─── TTS: ElevenLabs primary, Web Speech fallback ── */
-const FEMALE_PREFS = ["samantha","google uk english female","google us english female","female","woman","fiona","victoria","karen","moira","veena","zira","hazel"];
+const FEMALE_KEYS = ["female","woman","samantha","google uk english female","google us english female","fiona","victoria","karen","moira","veena","zira","hazel","nora","aria","jenny","sonia","natasha","leah","raveena","latha","alva","eva","cortana","elsa","amelie","ioana","mariam","kyoko","sin-ji","mei-jia","zosia","milena","paulina","laura","alice"];
+const MALE_KEYS   = ["male","man","david","james","daniel","richard","mark","thomas","george","alex","fred","paul","tom","jorge","oliver","wayne","henry","luca","xander","bruce","lee","carlos","diego","reed"];
+
+function isFemaleVoice(v: SpeechSynthesisVoice) {
+  const n = v.name.toLowerCase();
+  if (FEMALE_KEYS.some(f => n.includes(f))) return true;
+  if (MALE_KEYS.some(m => n.includes(m))) return false;
+  return true; // unknown → assume female rather than default-to-male
+}
+
 function pickVoice(lang: string): SpeechSynthesisVoice | null {
   const voices = window.speechSynthesis.getVoices();
   if (!voices.length) return null;
   const prefix = lang.split("-")[0];
-  const exact = voices.find((v) => v.lang === lang); if (exact) return exact;
-  const pre   = voices.find((v) => v.lang.startsWith(prefix)); if (pre) return pre;
-  if (prefix === "en") {
-    for (const p of FEMALE_PREFS) { const v = voices.find((v) => v.lang.startsWith("en") && v.name.toLowerCase().includes(p)); if (v) return v; }
-    return voices.find((v) => v.lang.startsWith("en")) ?? null;
+
+  /* 1 – exact locale, female */
+  const exactF = voices.find(v => v.lang === lang && isFemaleVoice(v));
+  if (exactF) return exactF;
+
+  /* 2 – lang prefix, female */
+  const preF = voices.find(v => v.lang.startsWith(prefix) && isFemaleVoice(v));
+  if (preF) return preF;
+
+  /* 3 – si/ta: native voice only — do NOT fall back to English (English voice skips Sinhala/Tamil glyphs and speaks only numbers) */
+  if (prefix === "si" || prefix === "ta") {
+    return voices.find(v => v.lang.startsWith(prefix)) ?? null;
   }
-  return voices.find((v) => !v.name.toLowerCase().includes("male")) ?? null;
+
+  /* 4 – any voice for the language (last resort) */
+  return voices.find(v => v.lang.startsWith(prefix)) ?? null;
 }
 
 async function playTTS(
   text: string, onStart: () => void, onEnd: () => void, lang: string,
   onWord?: (n: number) => void,
+  analyserRef?: { current: AnalyserNode | null },
 ): Promise<() => void> {
   const total = text.split(/\s+/).filter(Boolean).length;
   try {
-    const res = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+    const res = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, language: lang }) });
     if (!res.ok) throw new Error(`TTS ${res.status}`);
     const url = URL.createObjectURL(await res.blob());
     const audio = new Audio(url);
+
+    let audioCtx: AudioContext | null = null;
+    if (analyserRef && typeof AudioContext !== "undefined") {
+      try {
+        audioCtx = new AudioContext();
+        const src = audioCtx.createMediaElementSource(audio);
+        const node = audioCtx.createAnalyser(); node.fftSize = 256;
+        src.connect(node); node.connect(audioCtx.destination);
+        analyserRef.current = node;
+      } catch { /* no analyser, still plays */ }
+    }
+    const teardown = () => { if (analyserRef) analyserRef.current = null; audioCtx?.close().catch(() => {}); URL.revokeObjectURL(url); };
+
     audio.onplay = onStart;
     audio.ontimeupdate = () => { if (!onWord || !isFinite(audio.duration) || !audio.duration) return; onWord(Math.min(Math.ceil((audio.currentTime / audio.duration) * total), total)); };
-    audio.onended = () => { onWord?.(total); onEnd(); URL.revokeObjectURL(url); };
-    audio.onerror = () => { onWord?.(total); onEnd(); URL.revokeObjectURL(url); };
-    audio.play().catch(() => { onWord?.(total); onEnd(); });
-    return () => { audio.pause(); onEnd(); URL.revokeObjectURL(url); };
+    audio.onended = () => { onWord?.(total); teardown(); onEnd(); };
+    audio.onerror = () => { onWord?.(total); teardown(); onEnd(); };
+    audio.play().catch(() => { onWord?.(total); teardown(); onEnd(); });
+    return () => { audio.pause(); teardown(); onEnd(); };
   } catch {
+    if (analyserRef) analyserRef.current = null;
     if (typeof window === "undefined") return () => {};
     window.speechSynthesis.cancel();
     const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = lang; utter.rate = 0.9; utter.pitch = 1.1;
+    utter.rate = 0.88; utter.pitch = 1.25;
     const go = () => {
-      const v = pickVoice(lang); if (v) utter.voice = v;
+      const v = pickVoice(lang);
+      /* No voice found for this language (common for si/ta on desktop) — skip TTS, just show text */
+      if (!v) { onStart(); onWord?.(total); onEnd(); return; }
+      utter.voice = v; utter.lang = v.lang;
       utter.onstart = onStart;
       utter.onend   = () => { onWord?.(total); onEnd(); };
       utter.onerror = () => { onWord?.(total); onEnd(); };
@@ -119,8 +157,9 @@ function SetupScreen({ onStart }: {
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg2)", padding: "40px 20px" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", border: "1px solid var(--border)", borderRadius: 22, overflow: "hidden", boxShadow: "var(--shadow-lg)", maxWidth: 840, width: "100%" }}>
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg2)", padding: "24px 16px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "min(320px, 35%) 1fr", border: "1px solid var(--border)", borderRadius: 22, overflow: "hidden", boxShadow: "var(--shadow-lg)", maxWidth: 840, width: "100%" }}
+        className="setup-grid">
 
         {/* ── Left panel — branded ── */}
         <div style={{ background: "var(--inv)", color: "var(--inv-txt)", padding: "52px 40px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
@@ -279,17 +318,43 @@ function SummaryScreen({ summary, isSummarizing, study, respondent, messages, on
 }) {
   const [copied, setCopied] = useState(false);
 
-  const exportCSV = () => {
-    const header = "Role,Message\n";
-    const rows = messages
-      .filter((m) => m.role !== "system")
-      .map((m) => `"${m.role === "assistant" ? "Mrs Dissanayake" : "Respondent"}","${m.content.replace(/"/g, '""')}"`)
-      .join("\n");
-    const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
-    a.href = url; a.download = `interview-${Date.now()}.csv`; a.click();
-    URL.revokeObjectURL(url);
+  const exportExcel = () => {
+    const wb = XLSX.utils.book_new();
+
+    /* Sheet 1: Transcript */
+    const txRows = [
+      ["Speaker", "Message"],
+      ...messages
+        .filter((m) => m.role !== "system")
+        .map((m) => [m.role === "assistant" ? "Mrs Dissanayake" : "Respondent", m.content]),
+    ];
+    const txSheet = XLSX.utils.aoa_to_sheet(txRows);
+    txSheet["!cols"] = [{ wch: 20 }, { wch: 80 }];
+    XLSX.utils.book_append_sheet(wb, txSheet, "Transcript");
+
+    /* Sheet 2: Summary */
+    if (summary) {
+      const sumRows = summary.split("\n").map((line) => [line]);
+      const sumSheet = XLSX.utils.aoa_to_sheet(sumRows);
+      sumSheet["!cols"] = [{ wch: 100 }];
+      XLSX.utils.book_append_sheet(wb, sumSheet, "Summary");
+    }
+
+    /* Sheet 3: Respondent details */
+    if (respondent) {
+      const rRows = [
+        ["Field", "Value"],
+        ["Name",     respondent.name     ?? ""],
+        ["Age",      respondent.age      ?? ""],
+        ["Gender",   respondent.gender   ?? ""],
+        ["District", respondent.district ?? ""],
+      ];
+      const rSheet = XLSX.utils.aoa_to_sheet(rRows);
+      rSheet["!cols"] = [{ wch: 15 }, { wch: 30 }];
+      XLSX.utils.book_append_sheet(wb, rSheet, "Respondent");
+    }
+
+    XLSX.writeFile(wb, `interview-report-${Date.now()}.xlsx`);
   };
 
   const copySummary = async () => {
@@ -302,9 +367,9 @@ function SummaryScreen({ summary, isSummarizing, study, respondent, messages, on
   const studyLabel = STUDY_OPTIONS.find((s) => s.id === study?.studyType)?.label;
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "grid", gridTemplateColumns: "220px 1fr" }}>
+    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "grid", gridTemplateColumns: "220px 1fr" }} className="summary-grid">
       {/* Sidebar */}
-      <div style={{ background: "var(--bg2)", borderRight: "1px solid var(--border)", padding: "28px 20px", display: "flex", flexDirection: "column", gap: 4, position: "sticky", top: 0, height: "100vh", overflowY: "auto" }}>
+      <div style={{ background: "var(--bg2)", borderRight: "1px solid var(--border)", padding: "28px 20px", display: "flex", flexDirection: "column", gap: 4, position: "sticky", top: 0, height: "100vh", overflowY: "auto" }} className="summary-sidebar">
         <div style={{ fontFamily: "var(--font-serif)", fontSize: 18, padding: "0 8px", marginBottom: 28, display: "flex", alignItems: "center", gap: 7 }}>
           <div style={{ width: 20, height: 20, borderRadius: 5, background: "var(--inv)", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <svg viewBox="0 0 12 12" fill="none" width={10} height={10}><path d="M2 10L6 2l4 8" stroke="var(--inv-txt)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -336,8 +401,8 @@ function SummaryScreen({ summary, isSummarizing, study, respondent, messages, on
                 {copied ? <><Check size={13}/> Copied</> : <><Copy size={13}/> Copy</>}
               </button>
             )}
-            <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 9, border: "1px solid var(--border2)", background: "var(--bg2)", color: "var(--txt2)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
-              <Download size={13}/> Export CSV
+            <button onClick={exportExcel} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 9, border: "1px solid var(--border2)", background: "var(--bg2)", color: "var(--txt2)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
+              <Download size={13}/> Export Excel
             </button>
           </div>
         </div>
@@ -384,6 +449,7 @@ export interface PreConfig {
   language: Locale;
   productCategory: string;
   respondentName?: string;
+  customGuide?: string | null;
 }
 
 export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) {
@@ -393,6 +459,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   const [micSupported, setMicSupported] = useState(false);
   const [revealedWords, setRevealedWords] = useState(-1);
   const [seconds, setSeconds]         = useState(0);
+  const [isMobile, setIsMobile]       = useState(false);
 
   const bottomRef      = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -400,6 +467,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   const stopAudioRef   = useRef<(() => void) | null>(null);
   const taRef          = useRef<HTMLTextAreaElement>(null);
   const autoStarted    = useRef(false);
+  const analyserRef    = useRef<AnalyserNode | null>(null);
 
   const {
     messages, status, isLoading, isSummarizing,
@@ -411,6 +479,13 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   useEffect(() => {
     if (typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition))
       startTransition(() => setMicSupported(true));
+  }, []);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
   }, []);
 
   useEffect(() => {
@@ -433,6 +508,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
       preConfig.language,
       { productCategory: preConfig.productCategory, studyType: preConfig.studyType },
       respondentDetails,
+      preConfig.customGuide,
     );
   }, [preConfig, status, startInterview]);
 
@@ -448,6 +524,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
       () => { setIsSpeaking(false); setRevealedWords(-1); },
       LOCALE_BCP47[language],
       (n) => setRevealedWords(n),
+      analyserRef,
     );
     stopAudioRef.current = cleanup;
   }, [language]);
@@ -515,10 +592,23 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   if (status === "finished") return <SummaryScreen summary={summary} isSummarizing={isSummarizing} study={study} respondent={respondent} messages={messages} onReset={reset} />;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 400px", height: "100vh", overflow: "hidden" }}>
+    <div style={{
+      display: isMobile ? "flex" : "grid",
+      flexDirection: isMobile ? "column" : undefined,
+      gridTemplateColumns: isMobile ? undefined : "1fr 400px",
+      height: "100vh", overflow: "hidden",
+    }}>
 
       {/* ── LEFT: avatar side ── */}
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", borderRight: "1px solid var(--border)", overflow: "hidden", background: "#0d0d0f" }}>
+      <div style={{
+        display: "flex", flexDirection: "column",
+        height: isMobile ? "42vh" : "100%",
+        minHeight: isMobile ? 220 : undefined,
+        flexShrink: 0,
+        borderRight: isMobile ? "none" : "1px solid var(--border)",
+        borderBottom: isMobile ? "1px solid rgba(255,255,255,0.08)" : "none",
+        overflow: "hidden", background: "#0d0d0f",
+      }}>
 
         {/* Topbar */}
         <div style={{ position: "relative", zIndex: 10, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 22px", borderBottom: "1px solid rgba(255,255,255,0.07)", background: "rgba(13,13,15,0.85)", backdropFilter: "blur(10px)" }}>
@@ -544,7 +634,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
 
         {/* Avatar portrait */}
         <div style={{ flex: 1, position: "relative", minHeight: 0, overflow: "hidden" }}>
-          <AvatarPortrait isSpeaking={isSpeaking} isListening={isListening} />
+          <Avatar3D isSpeaking={isSpeaking} isListening={isListening} analyserRef={analyserRef} />
 
           {/* Bottom gradient overlay */}
           <div aria-hidden style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 220, pointerEvents: "none", background: "linear-gradient(to top, rgba(13,13,15,0.95) 0%, transparent 100%)" }} />
@@ -579,7 +669,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
       </div>
 
       {/* ── RIGHT: chat-side ── */}
-      <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "var(--bg)" }}>
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, height: isMobile ? "auto" : "100vh", minHeight: 0, background: "var(--bg)" }}>
         {/* Chat header */}
         <div style={{ padding: "17px 22px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 500, color: "var(--txt)" }}>Transcript</div>

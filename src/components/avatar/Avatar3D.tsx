@@ -1,154 +1,308 @@
 "use client";
 
-import { Component, Suspense, useRef, useEffect, type ReactNode } from "react";
+import {
+  Component, Suspense, useRef, useEffect, useState, useCallback, type ReactNode,
+} from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Environment, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
+import AvatarPortrait from "./AvatarPortrait";
 
 export interface Avatar3DProps {
   isSpeaking: boolean;
   isListening?: boolean;
-  /* pass useRef<AnalyserNode | null> from parent for real-time lip sync */
   analyserRef?: { current: AnalyserNode | null };
 }
 
-/* ─── Ready Player Me female avatar with ARKit + Oculus Visemes ─── */
-const RPM_URL =
-  "https://models.readyplayer.me/64bfa15f0e72c63d7c3934a6.glb" +
-  "?morphTargets=ARKit,Oculus%20Visemes&textureAtlas=1024&lod=0";
+/* ─────────────────────────────────────────────────────────────────────────────
+   Ready Player Me shut down January 2026. Use Avaturn instead (free, realistic):
 
-/* ─── ARKit viseme morph target names ─── */
-const VISEME_OPEN = ["viseme_aa", "viseme_E", "viseme_O", "mouthOpen"];
-const VISEME_BROW_RAISE = ["browInnerUp", "browOuterUpLeft", "browOuterUpRight"];
+   1. Go to  https://avaturn.me
+   2. Click "Create Avatar" → choose Female → customise → Export → "Download GLB"
+   3. Copy the downloaded .glb file into your project at:
+        public/avatar/female.glb
+   4. Change AVATAR_URL below to "/avatar/female.glb"
 
-function RPMAvatarInner({ isSpeaking, isListening = false, analyserRef }: Avatar3DProps) {
-  const { scene } = useGLTF(RPM_URL);
-  const groupRef   = useRef<THREE.Group>(null!);
-  const meshesRef  = useRef<THREE.SkinnedMesh[]>([]);
-  const freqBuf    = useRef<Uint8Array<ArrayBuffer> | null>(null);
-  const smoothAmp  = useRef(0);
-  const blinkTimer = useRef(3.2);
+   OR paste any hosted GLB URL directly — the code supports both Oculus Visemes
+   (viseme_aa / viseme_E …) and ARKit (jawOpen / mouthSmileLeft …) blend shapes.
+   ──────────────────────────────────────────────────────────────────────────── */
+const AVATAR_URL = "/avatar/female.glb"; /* ← change this once you have your GLB */
+
+useGLTF.preload(AVATAR_URL);
+
+/* ─── All RPM / ARKit viseme morph target names ───────────────────────────── */
+type VKey = "aa" | "E" | "I" | "O" | "U" | "PP" | "FF" | "TH" | "DD" | "kk" | "CH" | "SS" | "nn" | "RR";
+
+/* Each viseme maps candidates from: Oculus Visemes, ARKit, and common alt names.
+   First match found in the avatar's morphTargetDictionary is used. */
+const VMAP: Record<VKey, string[]> = {
+  aa: ["viseme_aa",  "jawOpen",         "mouthOpen"],
+  E:  ["viseme_E",   "mouthSmileLeft"],
+  I:  ["viseme_I",   "mouthStretchLeft"],
+  O:  ["viseme_O",   "mouthFunnel"],
+  U:  ["viseme_U",   "mouthPucker"],
+  PP: ["viseme_PP",  "mouthClose",      "mouthPressLeft"],
+  FF: ["viseme_FF",  "mouthLowerDownLeft"],
+  TH: ["viseme_TH",  "tongueOut"],
+  DD: ["viseme_DD",  "mouthUpperUpLeft"],
+  kk: ["viseme_kk",  "mouthShrugUpper"],
+  CH: ["viseme_CH",  "mouthShrugLower"],
+  SS: ["viseme_SS",  "mouthDimpleLeft"],
+  nn: ["viseme_nn",  "mouthRollLower"],
+  RR: ["viseme_RR",  "mouthRollUpper"],
+};
+
+const ALL_V_KEYS = Object.keys(VMAP) as VKey[];
+
+type VWeights = Record<VKey, number>;
+const zeroWeights = (): VWeights =>
+  Object.fromEntries(ALL_V_KEYS.map((k) => [k, 0])) as VWeights;
+
+/* Smooth linear interpolation helper */
+function lp(a: number, b: number, t: number) { return a + (b - a) * t; }
+
+/* ─── RPMAvatarInner ──────────────────────────────────────────────────────── */
+interface RPMProps extends Avatar3DProps { onReady: () => void }
+
+function RPMAvatarInner({ isSpeaking, isListening = false, analyserRef, onReady }: RPMProps) {
+  const { scene } = useGLTF(AVATAR_URL);
+
+  const groupRef    = useRef<THREE.Group>(null!);
+  const meshes      = useRef<THREE.SkinnedMesh[]>([]);
+  const headBone    = useRef<THREE.Bone | null>(null);
+  const neckBone    = useRef<THREE.Bone | null>(null);
+  const spineBone   = useRef<THREE.Bone | null>(null);
+  const readyFired  = useRef(false);
+
+  /* Smoothed frequency bands */
+  const lowSmooth  = useRef(0);
+  const midSmooth  = useRef(0);
+  const highSmooth = useRef(0);
+
+  /* Smoothed viseme weights */
+  const vWeights   = useRef<VWeights>(zeroWeights());
+
+  /* Blink state */
+  const blinkTimer = useRef(0);
   const blinkProg  = useRef(0);
-  const blinking   = useRef(false);
-  const headBone   = useRef<THREE.Bone | null>(null);
-  const neckBone   = useRef<THREE.Bone | null>(null);
+  const isBlinking = useRef(false);
+
+  /* Breathing */
+  const breathT    = useRef(0);
+
+  /* Frequency buffer */
+  const freqBuf    = useRef<Uint8Array | null>(null);
+
+  /* Pre-cache per-mesh morph target index maps */
+  const idxMaps = useRef<
+    { mesh: THREE.SkinnedMesh; map: Partial<Record<VKey, number[]>> }[]
+  >([]);
 
   useEffect(() => {
-    const meshes: THREE.SkinnedMesh[] = [];
+    const found: THREE.SkinnedMesh[] = [];
     scene.traverse((c) => {
       if (c instanceof THREE.SkinnedMesh) {
-        meshes.push(c);
-        c.castShadow = true;
+        found.push(c);
+        c.castShadow    = true;
         c.receiveShadow = true;
+        c.frustumCulled = false;
       }
       if (c instanceof THREE.Bone) {
         const n = c.name.toLowerCase();
-        if (n === "head" || n.includes("head") && !headBone.current) headBone.current = c as THREE.Bone;
-        if (n === "neck" || n.includes("neck") && !neckBone.current) neckBone.current = c as THREE.Bone;
+        if (!headBone.current  && n.includes("head"))  headBone.current  = c as THREE.Bone;
+        if (!neckBone.current  && n.includes("neck"))  neckBone.current  = c as THREE.Bone;
+        if (!spineBone.current && (n === "spine" || n === "spine1" || n === "spine2"))
+          spineBone.current = c as THREE.Bone;
       }
     });
-    meshesRef.current = meshes;
-  }, [scene]);
+    meshes.current = found;
+
+    /* Cache morph target indices once so useFrame doesn't do repeated dictionary lookups */
+    idxMaps.current = found.map((mesh) => {
+      const dict = mesh.morphTargetDictionary ?? {};
+      const map: Partial<Record<VKey, number[]>> = {};
+      for (const key of ALL_V_KEYS) {
+        const hits = VMAP[key].map((name) => dict[name]).filter((i) => i !== undefined) as number[];
+        if (hits.length) map[key] = hits;
+      }
+      return { mesh, map };
+    });
+
+    /* Randomise blink and breath phase on mount (safe outside render) */
+    blinkTimer.current = 2.5 + Math.random() * 3;
+    breathT.current    = Math.random() * Math.PI * 2;
+
+    if (!readyFired.current) { readyFired.current = true; onReady(); }
+  }, [scene, onReady]);
 
   useFrame((state, delta) => {
     const t = state.clock.elapsedTime;
 
-    /* Gentle idle sway */
-    groupRef.current.position.y = Math.sin(t * 0.75) * 0.006;
-    if (neckBone.current) {
-      neckBone.current.rotation.y += (Math.sin(t * 0.28) * 0.025 - neckBone.current.rotation.y) * 0.04;
-    }
-    if (headBone.current) {
-      const targetX = isListening ? -0.04 : Math.sin(t * 0.55) * 0.012;
-      headBone.current.rotation.x += (targetX - headBone.current.rotation.x) * 0.05;
-      headBone.current.rotation.y += (Math.sin(t * 0.22) * 0.018 - headBone.current.rotation.y) * 0.04;
-    }
-
-    /* ── Real audio amplitude from Web Audio API ── */
+    /* ── 1. Read audio analyser (3 frequency bands) ───────────────────────── */
     const analyser = analyserRef?.current;
-    let rawAmp = 0;
+    let rawLow = 0, rawMid = 0, rawHigh = 0;
+
     if (analyser) {
-      if (!freqBuf.current || freqBuf.current.length !== analyser.frequencyBinCount) {
-        freqBuf.current = new Uint8Array(analyser.frequencyBinCount) as Uint8Array<ArrayBuffer>;
-      }
-      analyser.getByteFrequencyData(freqBuf.current);
-      /* Speech fundamental + formant range ~85-3400Hz.
-         For fftSize 256 + sampleRate 44100Hz: bin width = 44100/256 ≈ 172Hz
-         Bins 2-20 cover roughly 344Hz-3440Hz (speech core) */
-      let sum = 0;
-      const lo = 2, hi = Math.min(20, freqBuf.current.length);
-      for (let i = lo; i < hi; i++) sum += freqBuf.current[i];
-      rawAmp = sum / ((hi - lo) * 255);
+      const bc = analyser.frequencyBinCount;
+      if (!freqBuf.current || freqBuf.current.length !== bc)
+        freqBuf.current = new Uint8Array(bc) as Uint8Array<ArrayBuffer>;
+      analyser.getByteFrequencyData(freqBuf.current as Uint8Array<ArrayBuffer>);
+
+      const avg = (lo: number, hi: number) => {
+        let s = 0; const n = Math.min(hi, bc);
+        for (let i = lo; i < n; i++) s += freqBuf.current![i] / 255;
+        return s / (n - lo);
+      };
+      /*
+        With fftSize=256 and ~44100 Hz sample rate, each bin ≈ 344 Hz:
+        bins 1–4   → ~344–1376 Hz  voiced fundamentals (drives open/close)
+        bins 4–14  → ~1376–4816 Hz vowel formants (drives vowel shapes)
+        bins 14–35 → ~4816–12040 Hz fricatives (s, f, th shapes)
+      */
+      rawLow  = avg(1, 4);
+      rawMid  = avg(4, 14);
+      rawHigh = avg(14, 35);
     } else if (isSpeaking) {
-      /* Fallback sine simulation when no analyser (Web Speech path) */
-      rawAmp = (Math.sin(t * 9.5) * 0.5 + 0.5) * 0.55 + Math.sin(t * 4.3) * 0.15;
-      rawAmp = Math.max(0, Math.min(1, rawAmp));
+      /* Procedural simulation when no analyser — gives natural-looking mouth movement */
+      rawLow  = Math.max(0, Math.sin(t * 7.4)       * 0.45 + 0.28 + Math.sin(t * 3.2)       * 0.12);
+      rawMid  = Math.max(0, Math.sin(t * 5.8 + 1.1) * 0.28 + 0.14 + Math.sin(t * 11.1 + 0.7) * 0.06);
+      rawHigh = Math.max(0, Math.sin(t * 13.2 + 2.5) * 0.14 + 0.04);
     }
 
-    /* Smooth amplitude for more natural movement */
-    smoothAmp.current += (rawAmp - smoothAmp.current) * 0.38;
-    const amp = smoothAmp.current;
+    /* Exponential smoothing — fast attack (0.40), slow release (0.15) */
+    const lowTarget  = rawLow,  midTarget  = rawMid,  highTarget  = rawHigh;
+    const lRate = rawLow  > lowSmooth.current  ? 0.40 : 0.18;
+    const mRate = rawMid  > midSmooth.current  ? 0.38 : 0.16;
+    const hRate = rawHigh > highSmooth.current ? 0.35 : 0.14;
+    lowSmooth.current  = lp(lowSmooth.current,  lowTarget,  lRate);
+    midSmooth.current  = lp(midSmooth.current,  midTarget,  mRate);
+    highSmooth.current = lp(highSmooth.current, highTarget, hRate);
 
-    /* ── Drive morph targets ── */
-    for (const mesh of meshesRef.current) {
-      const dict = mesh.morphTargetDictionary;
-      const inf  = mesh.morphTargetInfluences;
-      if (!dict || !inf) continue;
+    const low  = lowSmooth.current;
+    const mid  = midSmooth.current;
+    const high = highSmooth.current;
+    const totalAmp = Math.min(1, low + mid * 0.5 + high * 0.2);
 
-      /* Mouth open – try each viseme name */
-      let didOpen = false;
-      for (const name of VISEME_OPEN) {
-        const idx = dict[name];
-        if (idx !== undefined) {
-          inf[idx] += (amp * 0.95 - inf[idx]) * 0.40;
-          didOpen = true;
-          break;
-        }
+    /* ── 2. Compute target viseme weights ─────────────────────────────────── */
+    const target = zeroWeights();
+
+    if (totalAmp > 0.03) {
+      /* Open-mouth vowels — driven by low-frequency energy */
+      target.aa = Math.min(1, low * 2.0) * (1 - high * 0.6);     /* "aah" */
+      target.O  = Math.min(1, low * 1.4) * 0.55;                  /* "oh" */
+      target.U  = Math.min(1, low * 0.8) * 0.30;                  /* "oo" */
+
+      /* Front vowels — driven by mid-frequency formants */
+      target.E  = Math.min(1, mid * 1.8) * (1 - low * 0.7);       /* "ee" */
+      target.I  = Math.min(1, mid * 1.2) * 0.40;                  /* "ih" */
+
+      /* Fricatives — driven by high-frequency energy */
+      target.SS = Math.min(1, high * 3.0);                         /* s/z */
+      target.FF = Math.min(1, high * 2.2) * 0.65;                  /* f/v */
+      target.CH = Math.min(1, high * 1.8) * 0.45;                  /* ch/sh */
+      target.TH = Math.min(1, high * 1.5) * 0.35;                  /* th */
+
+      /* Light lip closure between syllables */
+      target.PP = Math.max(0, 0.25 - totalAmp * 1.8) * (isSpeaking ? 1 : 0);
+      target.nn = Math.max(0, 0.15 - totalAmp * 1.2) * (isSpeaking ? 1 : 0);
+    } else if (isSpeaking) {
+      /* Very quiet moment — small lip press so mouth doesn't just hang open */
+      target.PP = 0.12;
+    }
+
+    /* ── 3. Lerp viseme weights toward targets ────────────────────────────── */
+    /* Use different rates per group: vowels need to be fast, closures slower */
+    const OPEN_RATE  = 0.32;
+    const FRIC_RATE  = 0.28;
+    const CLOSE_RATE = 0.14;
+
+    for (const k of ["aa", "E", "I", "O", "U"] as VKey[])
+      vWeights.current[k] = lp(vWeights.current[k], target[k], OPEN_RATE);
+    for (const k of ["SS", "FF", "CH", "TH", "DD", "kk", "RR"] as VKey[])
+      vWeights.current[k] = lp(vWeights.current[k], target[k], FRIC_RATE);
+    for (const k of ["PP", "nn"] as VKey[])
+      vWeights.current[k] = lp(vWeights.current[k], target[k], CLOSE_RATE);
+
+    /* ── 4. Apply visemes + expressions to every mesh ─────────────────────── */
+    for (let mi = 0; mi < idxMaps.current.length; mi++) {
+      const entry = idxMaps.current[mi];
+      const inf  = entry.mesh.morphTargetInfluences;
+      const dict = entry.mesh.morphTargetDictionary;
+      if (!inf || !dict) continue;
+
+      /* Visemes */
+      for (const key of ALL_V_KEYS) {
+        const indices = entry.map[key];
+        if (!indices) continue;
+        const w = vWeights.current[key];
+        for (let ii = 0; ii < indices.length; ii++) inf[indices[ii]] = w;
       }
-      /* If no open viseme found, try mouthClose as inverse */
-      if (!didOpen) {
-        const closeIdx = dict["mouthClose"];
-        if (closeIdx !== undefined) inf[closeIdx] += ((isSpeaking ? 1 - amp : 1) - inf[closeIdx]) * 0.30;
-      }
 
-      /* Secondary lip shape when speaking – O viseme */
-      const oIdx = dict["viseme_O"];
-      if (oIdx !== undefined) inf[oIdx] += (amp * 0.35 - inf[oIdx]) * 0.28;
-
-      /* Lips pressed at rest */
-      const ppIdx = dict["viseme_PP"] ?? dict["mouthPressLeft"];
-      if (ppIdx !== undefined) inf[ppIdx] += ((isSpeaking ? 0 : 0.18) - inf[ppIdx]) * 0.08;
+      /* Smile — warm resting smile that dims slightly during intense speaking */
+      const smileOpen  = vWeights.current.aa + vWeights.current.O;
+      const smileBase  = lp(0.16, 0.06, Math.min(1, smileOpen * 1.5));
+      const slL = dict["mouthSmileLeft"];
+      const slR = dict["mouthSmileRight"];
+      if (slL !== undefined) inf[slL] = lp(inf[slL], smileBase, 0.04);
+      if (slR !== undefined) inf[slR] = lp(inf[slR], smileBase, 0.04);
 
       /* Brow raise when listening */
-      for (const name of VISEME_BROW_RAISE) {
-        const idx = dict[name];
-        if (idx !== undefined) inf[idx] += ((isListening ? 0.25 : 0) - inf[idx]) * 0.05;
+      const browTgt = isListening ? 0.30 : 0;
+      for (const bn of ["browInnerUp", "browOuterUpLeft", "browOuterUpRight"]) {
+        const idx = dict[bn];
+        if (idx !== undefined) inf[idx] = lp(inf[idx], browTgt, 0.04);
       }
-
-      /* Slight smile at rest */
-      const smileL = dict["mouthSmileLeft"];
-      const smileR = dict["mouthSmileRight"];
-      const smileTarget = isSpeaking ? 0.08 : 0.14;
-      if (smileL !== undefined) inf[smileL] += (smileTarget - inf[smileL]) * 0.05;
-      if (smileR !== undefined) inf[smileR] += (smileTarget - inf[smileR]) * 0.05;
 
       /* Blink */
       blinkTimer.current -= delta;
-      if (blinkTimer.current <= 0 && !blinking.current) {
-        blinking.current = true;
-        blinkProg.current = 0;
-        blinkTimer.current = Math.random() * 4.5 + 2.5;
+      if (blinkTimer.current <= 0 && !isBlinking.current) {
+        isBlinking.current = true;
+        blinkProg.current  = 0;
+        blinkTimer.current = 2.2 + Math.random() * 4.8;
       }
-      if (blinking.current) {
-        blinkProg.current = Math.min(blinkProg.current + delta / 0.11, 1);
-        const p  = blinkProg.current;
-        const v  = Math.max(p < 0.5 ? p * 2 : (1 - p) * 2, 0);
-        const lL = dict["eyeBlinkLeft"]  ?? dict["blink_left"];
-        const lR = dict["eyeBlinkRight"] ?? dict["blink_right"];
-        if (lL !== undefined) inf[lL] = v;
-        if (lR !== undefined) inf[lR] = v;
-        if (p >= 1) blinking.current = false;
+      if (isBlinking.current) {
+        blinkProg.current = Math.min(blinkProg.current + delta / 0.09, 1);
+        const p = blinkProg.current;
+        const v = p < 0.5 ? p * 2 : (1 - p) * 2;
+        for (const bn of ["eyeBlinkLeft",  "blink_left"])  { const i = dict[bn]; if (i !== undefined) inf[i] = v; }
+        for (const bn of ["eyeBlinkRight", "blink_right"]) { const i = dict[bn]; if (i !== undefined) inf[i] = v; }
+        if (p >= 1) isBlinking.current = false;
       }
+
+      /* Subtle cheek and jaw softness from speaking amplitude */
+      const cheekIdx = dict["cheekPuff"];
+      if (cheekIdx !== undefined) inf[cheekIdx] = lp(inf[cheekIdx], vWeights.current.aa * 0.08, 0.05);
+    }
+
+    /* ── 5. Skeleton animations ───────────────────────────────────────────── */
+    /* Breathing */
+    breathT.current += delta * 0.30;
+    const breath = Math.sin(breathT.current) * 0.006;
+
+    /* Whole-body subtle sway */
+    groupRef.current.position.y = breath + Math.sin(t * 0.55) * 0.003;
+    groupRef.current.rotation.y = Math.sin(t * 0.22) * 0.010;
+
+    if (spineBone.current) {
+      spineBone.current.rotation.x = breath * 0.5;
+      spineBone.current.rotation.z = Math.sin(t * 0.20) * 0.006;
+    }
+
+    if (neckBone.current) {
+      neckBone.current.rotation.y = lp(
+        neckBone.current.rotation.y,
+        Math.sin(t * 0.24) * 0.020,
+        0.030,
+      );
+      neckBone.current.rotation.z = Math.sin(t * 0.18) * 0.005;
+    }
+
+    if (headBone.current) {
+      /* Slight forward tilt when listening (attentive lean) */
+      const targetX = isListening ? -0.055 : Math.sin(t * 0.40) * 0.008;
+      const targetY = Math.sin(t * 0.17) * 0.014;
+      headBone.current.rotation.x = lp(headBone.current.rotation.x, targetX, 0.045);
+      headBone.current.rotation.y = lp(headBone.current.rotation.y, targetY, 0.035);
     }
   });
 
@@ -159,168 +313,133 @@ function RPMAvatarInner({ isSpeaking, isListening = false, analyserRef }: Avatar
   );
 }
 
-/* ─────────────────────────────────────── Geometry fallback ─── */
-const SKIN = "#C5805A"; const HAIR = "#120704"; const BLAZER = "#1A2A5C";
-const COLLAR = "#EDE8DC"; const LIP = "#A8685E"; const LIP_D = "#6C3636";
-const IRIS = "#4A2C00"; const GOLD = "#D4AF37";
-
-function GeometryAvatar({ isSpeaking, isListening = false, analyserRef }: Avatar3DProps) {
-  const bodyRef  = useRef<THREE.Group>(null!);
-  const headRef  = useRef<THREE.Group>(null!);
-  const jawRef   = useRef<THREE.Group>(null!);
-  const mouthRef = useRef<THREE.Mesh>(null!);
-  const leftLid  = useRef<THREE.Mesh>(null!);
-  const rightLid = useRef<THREE.Mesh>(null!);
-
-  const blinkTimer = useRef(3.5);
-  const blinkProg  = useRef(0);
-  const blinking   = useRef(false);
-  const listenTilt = useRef(0);
-  const mouthOpen  = useRef(0);
-  const smoothAmp  = useRef(0);
-  const freqBuf    = useRef<Uint8Array<ArrayBuffer> | null>(null);
-
-  useFrame((state, delta) => {
-    const t = state.clock.elapsedTime;
-    bodyRef.current.position.y = Math.sin(t * 1.08) * 0.016;
-    headRef.current.rotation.y = Math.sin(t * 0.32) * 0.032;
-    const targetTilt = isListening ? -0.10 : 0;
-    listenTilt.current += (targetTilt - listenTilt.current) * 0.06;
-    headRef.current.rotation.z = listenTilt.current;
-    const targetNod = isSpeaking ? Math.sin(t * 2.8) * 0.014 : 0;
-    headRef.current.rotation.x += (targetNod - headRef.current.rotation.x) * 0.12;
-
-    /* Audio amplitude */
-    const analyser = analyserRef?.current;
-    let rawAmp = 0;
-    if (analyser) {
-      if (!freqBuf.current || freqBuf.current.length !== analyser.frequencyBinCount) {
-        freqBuf.current = new Uint8Array(analyser.frequencyBinCount) as Uint8Array<ArrayBuffer>;
-      }
-      analyser.getByteFrequencyData(freqBuf.current);
-      let sum = 0;
-      const lo = 2, hi = Math.min(20, freqBuf.current.length);
-      for (let i = lo; i < hi; i++) sum += freqBuf.current[i];
-      rawAmp = sum / ((hi - lo) * 255);
-    } else if (isSpeaking) {
-      rawAmp = Math.max(0, Math.min(1, (Math.sin(t * 9) * 0.5 + 0.5) * 0.7));
-    }
-    smoothAmp.current += (rawAmp - smoothAmp.current) * 0.38;
-    mouthOpen.current = smoothAmp.current;
-
-    if (jawRef.current) {
-      jawRef.current.rotation.x = mouthOpen.current * 0.55;
-      jawRef.current.position.y = -0.230 - mouthOpen.current * 0.028;
-    }
-    if (mouthRef.current) mouthRef.current.scale.y = 0.001 + mouthOpen.current * 1.2;
-
-    /* Blink */
-    blinkTimer.current -= delta;
-    if (blinkTimer.current <= 0 && !blinking.current) {
-      blinking.current = true; blinkProg.current = 0;
-      blinkTimer.current = Math.random() * 4 + 3;
-    }
-    if (blinking.current) {
-      blinkProg.current = Math.min(blinkProg.current + delta / 0.13, 1);
-      const p = blinkProg.current;
-      const lid = Math.max(p < 0.5 ? p * 2 : (1 - p) * 2, 0.001);
-      if (leftLid.current)  leftLid.current.scale.y  = lid;
-      if (rightLid.current) rightLid.current.scale.y = lid;
-      if (p >= 1) { blinking.current = false; leftLid.current.scale.y = 0.001; rightLid.current.scale.y = 0.001; }
-    }
-  });
-
-  return (
-    <group ref={bodyRef} position={[0, -0.35, 0]}>
-      <mesh position={[0, -0.65, 0]}><cylinderGeometry args={[0.135, 0.165, 0.30, 32]} /><meshStandardMaterial color={SKIN} roughness={0.60} /></mesh>
-      <mesh position={[0, -1.08, 0]}><boxGeometry args={[1.08, 0.48, 0.52]} /><meshStandardMaterial color={BLAZER} roughness={0.70} /></mesh>
-      <mesh position={[-0.55, -0.94, 0]} rotation={[0,0,0.35]}><capsuleGeometry args={[0.088,0.20,6,14]} /><meshStandardMaterial color={BLAZER} roughness={0.70} /></mesh>
-      <mesh position={[0.55, -0.94, 0]} rotation={[0,0,-0.35]}><capsuleGeometry args={[0.088,0.20,6,14]} /><meshStandardMaterial color={BLAZER} roughness={0.70} /></mesh>
-      <mesh position={[0, -0.88, 0.265]}><boxGeometry args={[0.18,0.22,0.018]} /><meshStandardMaterial color={COLLAR} roughness={0.62} /></mesh>
-      <group ref={headRef}>
-        <mesh scale={[1,1.09,0.92]}><sphereGeometry args={[0.50,64,64]} /><meshStandardMaterial color={SKIN} roughness={0.58} /></mesh>
-        <mesh position={[0,0.05,0]} scale={[1.012,1.105,0.930]}><sphereGeometry args={[0.506,64,48,0,Math.PI*2,0,Math.PI*0.524]} /><meshStandardMaterial color={HAIR} roughness={0.91} /></mesh>
-        <mesh position={[0,0.45,-0.41]}><sphereGeometry args={[0.135,28,28]} /><meshStandardMaterial color={HAIR} roughness={0.91} /></mesh>
-        <mesh position={[0,0.162,0.496]}><circleGeometry args={[0.026,20]} /><meshStandardMaterial color="#CC0000" emissive="#990000" emissiveIntensity={0.65} roughness={0.18} /></mesh>
-        <mesh position={[-0.174,0.106,0.479]} rotation={[0,-0.09,-0.08]}><capsuleGeometry args={[0.011,0.102,4,10]} /><meshStandardMaterial color="#0D0400" roughness={0.82} /></mesh>
-        <mesh position={[0.174,0.106,0.479]} rotation={[0,0.09,0.08]}><capsuleGeometry args={[0.011,0.102,4,10]} /><meshStandardMaterial color="#0D0400" roughness={0.82} /></mesh>
-        <group position={[-0.168,0.040,0.450]}>
-          <mesh scale={[1,0.78,0.66]}><sphereGeometry args={[0.066,28,28]} /><meshStandardMaterial color="#F5F0E6" roughness={0.18} /></mesh>
-          <mesh position={[0,0,0.040]}><circleGeometry args={[0.040,26]} /><meshStandardMaterial color={IRIS} roughness={0.25} /></mesh>
-          <mesh position={[0,0,0.046]}><circleGeometry args={[0.023,18]} /><meshStandardMaterial color="#040100" roughness={0.16} /></mesh>
-          <mesh position={[0.013,0.013,0.052]}><circleGeometry args={[0.009,8]} /><meshStandardMaterial color="white" emissive="white" emissiveIntensity={1.2} /></mesh>
-          <mesh ref={leftLid} position={[0,0.032,0.048]} scale={[1,0.001,1]}><sphereGeometry args={[0.070,26,18,0,Math.PI*2,0,Math.PI*0.60]} /><meshStandardMaterial color={SKIN} roughness={0.60} /></mesh>
-        </group>
-        <group position={[0.168,0.040,0.450]}>
-          <mesh scale={[1,0.78,0.66]}><sphereGeometry args={[0.066,28,28]} /><meshStandardMaterial color="#F5F0E6" roughness={0.18} /></mesh>
-          <mesh position={[0,0,0.040]}><circleGeometry args={[0.040,26]} /><meshStandardMaterial color={IRIS} roughness={0.25} /></mesh>
-          <mesh position={[0,0,0.046]}><circleGeometry args={[0.023,18]} /><meshStandardMaterial color="#040100" roughness={0.16} /></mesh>
-          <mesh position={[0.013,0.013,0.052]}><circleGeometry args={[0.009,8]} /><meshStandardMaterial color="white" emissive="white" emissiveIntensity={1.2} /></mesh>
-          <mesh ref={rightLid} position={[0,0.032,0.048]} scale={[1,0.001,1]}><sphereGeometry args={[0.070,26,18,0,Math.PI*2,0,Math.PI*0.60]} /><meshStandardMaterial color={SKIN} roughness={0.60} /></mesh>
-        </group>
-        <mesh position={[0,-0.055,0.490]} scale={[0.42,0.72,0.40]}><capsuleGeometry args={[0.014,0.068,4,10]} /><meshStandardMaterial color="#B07838" roughness={0.70} /></mesh>
-        <group ref={jawRef} position={[0,-0.230,0]}>
-          <mesh ref={mouthRef} position={[0,0,0.480]} scale={[1,0.001,1]}><circleGeometry args={[0.072,24]} /><meshStandardMaterial color="#160404" roughness={0.96} /></mesh>
-          <mesh position={[0,0.022,0.484]}><torusGeometry args={[0.068,0.015,8,26,Math.PI]} /><meshStandardMaterial color={LIP} roughness={0.44} /></mesh>
-          <mesh position={[0,-0.016,0.484]} rotation={[0,0,Math.PI]}><torusGeometry args={[0.070,0.018,8,26,Math.PI]} /><meshStandardMaterial color={LIP} roughness={0.44} /></mesh>
-          <mesh position={[0,0.002,0.486]} rotation={[0,0,Math.PI/2]}><capsuleGeometry args={[0.004,0.108,4,8]} /><meshStandardMaterial color={LIP_D} roughness={0.62} /></mesh>
-        </group>
-        <mesh position={[-0.492,-0.018,0.015]} scale={[0.48,0.60,0.30]}><sphereGeometry args={[0.096,16,16]} /><meshStandardMaterial color={SKIN} roughness={0.62} /></mesh>
-        <mesh position={[0.492,-0.018,0.015]} scale={[0.48,0.60,0.30]}><sphereGeometry args={[0.096,16,16]} /><meshStandardMaterial color={SKIN} roughness={0.62} /></mesh>
-        <mesh position={[-0.508,-0.055,0]}><sphereGeometry args={[0.013,10,10]} /><meshStandardMaterial color={GOLD} roughness={0.14} metalness={0.90} /></mesh>
-        <mesh position={[0.508,-0.055,0]}><sphereGeometry args={[0.013,10,10]} /><meshStandardMaterial color={GOLD} roughness={0.14} metalness={0.90} /></mesh>
-      </group>
-    </group>
-  );
-}
-
-/* ─── Error boundary ─── */
+/* ─── Error boundary ──────────────────────────────────────────────────────── */
 class AvatarErrorBoundary extends Component<
-  { fallback: ReactNode; children: ReactNode },
+  { children: ReactNode; onError: () => void },
   { failed: boolean }
 > {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
-  render() { return this.state.failed ? this.props.fallback : this.props.children; }
+  componentDidCatch() { this.props.onError(); }
+  render() {
+    if (this.state.failed) return null;
+    return this.props.children;
+  }
 }
 
-/* ─── Scene ─── */
-function AvatarScene(props: Avatar3DProps) {
+/* ─── Scene wrapper ───────────────────────────────────────────────────────── */
+interface SceneProps extends Avatar3DProps { onReady: () => void; onError: () => void }
+
+function AvatarScene({ onReady, onError, ...props }: SceneProps) {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const readyCb = useCallback(() => onReady(), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const errorCb = useCallback(() => onError(), []);
+
   return (
     <>
-      {/* Soft key light */}
-      <ambientLight intensity={0.85} />
-      <directionalLight position={[1.5, 3.5, 2.8]} intensity={1.8} color="#fff9f4" castShadow shadow-mapSize={[512, 512]} />
-      {/* Fill light from left */}
-      <directionalLight position={[-2.2, 1.8, 1.6]} intensity={0.70} color="#dde8ff" />
-      {/* Rim / hair light */}
-      <directionalLight position={[0, 1.2, -2.5]} intensity={0.40} color="#ffe0c0" />
-      {/* Under-chin soft fill */}
-      <pointLight position={[0, -0.6, 1.4]} intensity={0.22} color="#fff4e0" />
+      {/* Three-point lighting for warm professional look */}
+      <ambientLight intensity={0.9} />
+      <directionalLight
+        position={[1.4, 3.2, 2.6]} intensity={2.2}
+        color="#fff8f2" castShadow
+        shadow-mapSize={[512, 512]}
+      />
+      <directionalLight position={[-2.0, 1.6, 1.4]} intensity={0.75} color="#dce8ff" />
+      <directionalLight position={[0,    1.0, -2.2]} intensity={0.40} color="#ffe4c4" />
+      <pointLight       position={[0,   -0.3,  1.3]} intensity={0.22} color="#fff4e0" />
+
       <Environment preset="apartment" background={false} />
 
-      <AvatarErrorBoundary fallback={<GeometryAvatar {...props} />}>
-        <Suspense fallback={<GeometryAvatar {...props} />}>
-          <RPMAvatarInner {...props} />
+      <AvatarErrorBoundary onError={errorCb}>
+        <Suspense fallback={null}>
+          <RPMAvatarInner {...props} onReady={readyCb} />
         </Suspense>
       </AvatarErrorBoundary>
     </>
   );
 }
 
-/* ─── Public export ─── */
-export default function Avatar3D(props: Avatar3DProps) {
+/* ─── Loading overlay ─────────────────────────────────────────────────────── */
+function LoadingOverlay() {
+  const [dots, setDots] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setDots((d) => (d + 1) % 4), 500);
+    return () => clearInterval(id);
+  }, []);
+
   return (
-    /* position:absolute + inset:0 gives R3F Canvas explicit pixel dimensions from its positioned parent */
-    <div style={{ position: "absolute", inset: 0 }}>
-      <Canvas
-        camera={{ position: [0, 0.18, 1.65], fov: 28 }}
-        shadows
-        style={{ width: "100%", height: "100%", background: "transparent", display: "block" }}
-        gl={{ antialias: true, alpha: true }}
-      >
-        <AvatarScene {...props} />
-      </Canvas>
+    <div style={{
+      position: "absolute", inset: 0, zIndex: 10,
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      background: "#0d0d0f", gap: 20,
+    }}>
+      <svg width="72" height="100" viewBox="0 0 72 100" fill="none"
+        style={{ opacity: 0.16, animation: "breathe 2.6s ease-in-out infinite" }}>
+        <ellipse cx="36" cy="25" rx="18" ry="22" fill="white" />
+        <path d="M6 100 Q12 64 36 56 Q60 64 66 100Z" fill="white" />
+      </svg>
+      <div style={{ textAlign: "center" }}>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.42)", letterSpacing: "0.06em" }}>
+          Loading avatar{".".repeat(dots)}
+        </p>
+        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.18)", marginTop: 4 }}>
+          First load may take a moment
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Public component ────────────────────────────────────────────────────── */
+export default function Avatar3D(props: Avatar3DProps) {
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /* 5 s timeout — if GLB hasn't arrived, fall back to 2D portrait */
+  useEffect(() => {
+    timerRef.current = setTimeout(
+      () => setLoadState((s) => (s === "loading" ? "error" : s)),
+      5_000,
+    );
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, []);
+
+  const handleReady = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setLoadState("ready");
+  }, []);
+
+  const handleError = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setLoadState("error");
+  }, []);
+
+  return (
+    <div style={{ position: "absolute", inset: 0, background: "#0d0d0f" }}>
+      {loadState === "loading" && <LoadingOverlay />}
+
+      {loadState === "error" && (
+        <AvatarPortrait isSpeaking={props.isSpeaking} isListening={props.isListening} />
+      )}
+
+      {/* Canvas is always mounted so loading begins immediately */}
+      <div style={{
+        position: "absolute", inset: 0,
+        opacity: loadState === "ready" ? 1 : 0,
+        transition: "opacity 0.8s ease",
+        pointerEvents: loadState === "ready" ? "auto" : "none",
+      }}>
+        <Canvas
+          camera={{ position: [0, 0.12, 1.5], fov: 28 }}
+          shadows
+          style={{ width: "100%", height: "100%", background: "transparent", display: "block" }}
+          gl={{ antialias: true, alpha: true }}
+        >
+          <AvatarScene {...props} onReady={handleReady} onError={handleError} />
+        </Canvas>
+      </div>
     </div>
   );
 }

@@ -5,7 +5,7 @@ export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   try {
-    const { text, voiceId } = await req.json();
+    const { text, voiceId, language } = await req.json();
 
     if (!text || typeof text !== "string") {
       return NextResponse.json(
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     const elevenResp = await streamTTS(
       // Truncate to 5000 chars – ElevenLabs enforces a per-request text limit
       text.slice(0, 5000),
-      { voiceId }
+      { voiceId, language }
     );
 
     // Pipe the ElevenLabs audio stream directly to the client

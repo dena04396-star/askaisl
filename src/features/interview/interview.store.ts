@@ -39,14 +39,16 @@ export function useInterviewStore() {
   const [language, setLanguage] = useState<Locale>("en");
   const [study, setStudy] = useState<StudyContext | undefined>();
   const [respondent, setRespondent] = useState<RespondentDetails | undefined>();
+  const [customGuide, setCustomGuide] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
   const [showClosingBanner, setShowClosingBanner] = useState(false);
 
   const startInterview = useCallback(
-    async (lang: Locale, ctx: StudyContext, respondentDetails?: RespondentDetails) => {
+    async (lang: Locale, ctx: StudyContext, respondentDetails?: RespondentDetails, guide?: string | null) => {
       setLanguage(lang);
       setStudy(ctx);
       setRespondent(respondentDetails);
+      setCustomGuide(guide ?? null);
       setStatus("active");
       setIsLoading(true);
       setShowClosingBanner(false);
@@ -55,7 +57,7 @@ export function useInterviewStore() {
         let streamedText = "";
         const raw = await sendMessage([], lang, sessionId, ctx, (chunk) => {
           streamedText += chunk;
-        });
+        }, guide);
 
         const reply = sanitize(raw);
         setMessages([{ role: "assistant", content: reply }]);
@@ -78,7 +80,7 @@ export function useInterviewStore() {
         let streamedText = "";
         const raw = await sendMessage(next, language, sessionId, study, (chunk) => {
           streamedText += chunk;
-        });
+        }, customGuide);
 
         const reply = sanitize(raw);
         setMessages([...next, { role: "assistant", content: reply }]);
@@ -88,7 +90,7 @@ export function useInterviewStore() {
         setIsLoading(false);
       }
     },
-    [messages, language, sessionId, study]
+    [messages, language, sessionId, study, customGuide]
   );
 
   const endInterview = useCallback(async () => {
@@ -126,6 +128,7 @@ export function useInterviewStore() {
     setSummary(null);
     setStudy(undefined);
     setRespondent(undefined);
+    setCustomGuide(null);
     setShowClosingBanner(false);
   }, []);
 
