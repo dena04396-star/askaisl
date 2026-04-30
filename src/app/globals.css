@@ -154,6 +154,14 @@ mark.karaoke {
 .vt-type-card  { transition: all 0.18s; color: var(--txt); text-decoration: none; }
 .vt-type-card:hover { background: var(--inv) !important; color: var(--inv-txt) !important; border-color: transparent !important; transform: translateY(-3px); box-shadow: var(--shadow-lg); }
 
+/* ── Mobile responsive ── */
+@media (max-width: 640px) {
+  .setup-grid { grid-template-columns: 1fr !important; }
+  .setup-grid > :first-child { display: none !important; }
+  .summary-grid { grid-template-columns: 1fr !important; }
+  .summary-grid > .summary-sidebar { display: none !important; }
+}
+
 .vt-compare-row { transition: background 0.15s; }
 .vt-compare-row:hover { background: var(--bg2); }
 
