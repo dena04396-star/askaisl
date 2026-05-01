@@ -42,6 +42,7 @@ export interface RespondentDetails {
   age?: string;
   gender?: string;
   district?: string;
+  occupation?: string;
 }
 
 export interface SessionRow {
@@ -51,6 +52,7 @@ export interface SessionRow {
   study_type: StudyType;
   language: Locale;
   product_category: string;
+  discussion_guide?: string | null;
   created_by: string;
   status: "active" | "closed";
   created_at: string;

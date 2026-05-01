@@ -8,7 +8,7 @@ import type { Locale, StudyContext, ChatMessage } from "@/types";
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, language, sessionId, study } = await req.json();
+    const { messages, language, sessionId, study, customGuide } = await req.json();
 
     if (!Array.isArray(messages)) {
       return NextResponse.json(
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     const stream = await openai.chat.completions.create({
       model: getModelName(),
       messages: [
-        { role: "system", content: buildSystemPrompt(locale, studyCtx, messageCount) },
+        { role: "system", content: buildSystemPrompt(locale, studyCtx, messageCount, typeof customGuide === "string" ? customGuide : undefined) },
         ...recentMessages.map((m) => ({ role: m.role, content: m.content })),
       ],
       temperature: 0.65,
