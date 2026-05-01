@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { useInterviewStore } from "@/features/interview/interview.store";
 import type { Locale, StudyType, StudyContext, RespondentDetails } from "@/types";
 import dynamic from "next/dynamic";
-const Avatar3D = dynamic(() => import("@/components/avatar/Avatar3D"), { ssr: false });
+const InterviewAvatar = dynamic(() => import("@/components/avatar/InterviewAvatar"), { ssr: false });
 
 declare global {
   interface Window {
@@ -733,7 +733,13 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
 
         {/* Avatar portrait */}
         <div style={{ flex: 1, position: "relative", minHeight: 0, overflow: "hidden" }}>
-          <Avatar3D isSpeaking={isSpeaking} isListening={isListening} analyserRef={analyserRef} />
+          <InterviewAvatar
+            isSpeaking={isSpeaking}
+            isListening={isListening}
+            language={LOCALE_BCP47[language]}
+            speakText={isSpeaking ? (messages.filter(m => m.role === "assistant").at(-1)?.content ?? null) : null}
+            analyserRef={analyserRef}
+          />
 
           {/* Bottom gradient overlay */}
           <div aria-hidden style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 220, pointerEvents: "none", background: "linear-gradient(to top, rgba(13,13,15,0.95) 0%, transparent 100%)" }} />

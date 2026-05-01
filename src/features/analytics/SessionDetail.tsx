@@ -1,6 +1,9 @@
+"use client";
+
+import { useState } from "react";
 import type { SessionRow, TranscriptEntry } from "@/types";
 import { formatDate } from "@/lib/utils/helpers";
-import { ArrowLeft, Download, Users, MessageCircle } from "lucide-react";
+import { ArrowLeft, Download, Users, MessageCircle, Copy, Check, Link } from "lucide-react";
 import * as XLSX from "xlsx";
 
 const STUDY_LABELS: Record<string, string> = {
@@ -25,10 +28,24 @@ interface Props {
 
 /** Full drill-down view for a single session — shows metadata, stats, and every respondent's conversation. */
 export function SessionDetail({ session, transcripts, onBack }: Props) {
+  const [copied, setCopied] = useState(false);
+
   const totalMessages = transcripts.reduce(
     (n, t) => n + t.messages.filter((m) => m.role !== "system").length,
     0
   );
+
+  const shareUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/session/${session.token}`
+      : `/session/${session.token}`;
+
+  function copyShareLink() {
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
 
   function exportToExcel() {
     const wb = XLSX.utils.book_new();
@@ -53,6 +70,36 @@ export function SessionDetail({ session, transcripts, onBack }: Props) {
     XLSX.writeFile(wb, `${session.title.replace(/[^a-zA-Z0-9]/g, "-")}-data.xlsx`);
   }
 
+  function exportAllAsJSON() {
+    const data = {
+      session: {
+        title: session.title,
+        category: session.product_category,
+        studyType: STUDY_LABELS[session.study_type] ?? session.study_type,
+        language: LANG_LABELS[session.language] ?? session.language,
+        status: session.status,
+        createdAt: session.created_at,
+      },
+      respondents: transcripts.map((t, i) => ({
+        respondent: i + 1,
+        date: t.createdAt,
+        messages: t.messages
+          .filter((m) => m.role !== "system")
+          .map((m) => ({
+            speaker: m.role === "assistant" ? "Interviewer" : "Respondent",
+            text: m.content,
+          })),
+      })),
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${session.title.replace(/[^a-zA-Z0-9]/g, "-")}-full.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {/* ── Toolbar ── */}
@@ -64,12 +111,37 @@ export function SessionDetail({ session, transcripts, onBack }: Props) {
         >
           <ArrowLeft size={15} /> Back to all sessions
         </button>
-        {transcripts.length > 0 && (
-          <button onClick={exportToExcel} className="vt-btn-ghost"
+        <div className="flex items-center gap-3">
+          <button onClick={copyShareLink} className="vt-btn-ghost"
             style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: 13 }}>
-            <Download size={13} /> Export to Excel
+            {copied ? <><Check size={13} /> Copied!</> : <><Link size={13} /> Copy Link</>}
           </button>
-        )}
+          {transcripts.length > 0 && (
+            <>
+              <button onClick={exportToExcel} className="vt-btn-ghost"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: 13 }}>
+                <Download size={13} /> Export Excel
+              </button>
+              <button onClick={exportAllAsJSON} className="vt-btn-ghost"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", fontSize: 13 }}>
+                <Download size={13} /> Export JSON
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── Share link card ── */}
+      <div className="flex items-center gap-3 p-4 rounded-xl border"
+        style={{ background: "var(--bg2)", borderColor: "var(--border)" }}>
+        <Copy size={14} style={{ color: "var(--txt3)", flexShrink: 0 }} />
+        <code className="text-xs flex-1 truncate" style={{ color: "var(--txt2)", fontFamily: "monospace" }}>
+          {shareUrl}
+        </code>
+        <button onClick={copyShareLink} className="text-xs font-medium cursor-pointer shrink-0"
+          style={{ background: "none", border: "none", color: "var(--txt)", fontFamily: "inherit" }}>
+          {copied ? "Copied!" : "Copy"}
+        </button>
       </div>
 
       {/* ── Session info card ── */}
