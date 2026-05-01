@@ -188,7 +188,17 @@ function SetupScreen({ onStart }: {
   const [occupation, setOccupation] = useState("");
 
   const canStart = product.trim().length > 0;
-  const handleStart = () => {
+  const handleStart = async () => {
+    try {
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+      await navigator.mediaDevices.getDisplayMedia({ 
+        video: { displaySurface: "monitor" },
+        audio: false 
+      });
+    } catch (err) {
+      alert("You must allow both microphone and screen sharing to begin the interview.");
+      return;
+    }
     const r: RespondentDetails = {};
     if (name.trim())       r.name       = name.trim();
     if (age.trim())        r.age        = age.trim();
@@ -708,17 +718,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
             <span style={{ fontSize: 13, color: "rgba(255,255,255,0.45)" }}>{timerStr}</span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            {!preConfig && (
-              <button
-                title="Delete Session"
-                onClick={reset}
-                style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.18)"; e.currentTarget.style.color = "#f87171"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.35)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.5)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)"; }}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path></svg>
-              </button>
-            )}
+
             <button
               title="End session"
               onClick={endInterview}

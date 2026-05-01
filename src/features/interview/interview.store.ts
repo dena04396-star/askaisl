@@ -97,6 +97,9 @@ export function useInterviewStore() {
   const endInterview = useCallback(async () => {
     setStatus("finished");
     setIsSummarizing(true);
+    if (typeof window !== "undefined") {
+      (window as any).interviewFinished = true;
+    }
     const transcript = messages
       .map((m) =>
         m.role === "assistant"

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { Copy, Check, Plus, X, ExternalLink, ChevronDown, ChevronUp } from "lucide-react";
+import { Copy, Check, Plus, X, ExternalLink, ChevronDown, ChevronUp, Trash2, Download } from "lucide-react";
+import * as XLSX from "xlsx";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { getBrowserClient } from "@/lib/auth/client";
 import { formatDate } from "@/lib/utils/helpers";
@@ -94,7 +95,7 @@ export default function DashboardPage() {
   /* ── Transcripts ── */
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
   const [txLoading,   setTxLoading]   = useState(true);
-  const [selected,    setSelected]    = useState<TranscriptEntry | null>(null);
+  const [expandedSession, setExpandedSession] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -157,6 +158,36 @@ export default function DashboardPage() {
     setTimeout(() => setCopiedToken(null), 2000);
   }
 
+  async function deleteSession(id: string, token: string) {
+    if (!confirm("Permanently delete this session and its data?")) return;
+    const { error } = await getBrowserClient().from("interview_sessions").delete().eq("id", id);
+    if (!error) {
+      setSessions((s) => s.filter((x) => x.id !== id));
+      setTranscripts((t) => t.filter((x) => x.sessionId !== token));
+
+    }
+  }
+
+  function exportSessionData(s: SessionRow) {
+    const sessionTranscripts = transcripts.filter(t => t.sessionId === s.token);
+    if (sessionTranscripts.length === 0) return;
+
+    const wb = XLSX.utils.book_new();
+    sessionTranscripts.forEach((transcript, i) => {
+      const rows = [
+        ["Speaker", "Message"],
+        ...transcript.messages.filter(m => m.role !== "system").map(m => [
+          m.role === "assistant" ? "Interviewer" : "Respondent",
+          m.content
+        ])
+      ];
+      const sheet = XLSX.utils.aoa_to_sheet(rows);
+      sheet["!cols"] = [{ wch: 15 }, { wch: 80 }];
+      XLSX.utils.book_append_sheet(wb, sheet, sessionTranscripts.length > 1 ? `Respondent ${i + 1}` : "Transcript");
+    });
+    XLSX.writeFile(wb, `${s.title.replace(/[^a-zA-Z0-9]/g, '-')}-data.xlsx`);
+  }
+
   const inputSm: React.CSSProperties = {
     width: "100%", padding: "10px 13px", background: "var(--bg)", color: "var(--txt)",
     border: "1px solid var(--border)", borderRadius: 9, fontSize: 14, outline: "none",
@@ -175,6 +206,7 @@ export default function DashboardPage() {
             <LogoMark /> vinterview
           </Link>
           <div className="flex items-center gap-3">
+            <Link href="/analytics" className="text-sm font-medium no-underline" style={{ color: "var(--txt2)" }}>Analytics</Link>
             <span className="hidden sm:block text-sm" style={{ color: "var(--txt3)" }}>{user?.email}</span>
             <button onClick={signOut} className="vt-btn-ghost" style={{ padding: "7px 14px", fontSize: 13 }}>
               Sign out
@@ -314,7 +346,8 @@ export default function DashboardPage() {
           ) : (
             <div style={{ border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden" }}>
               {sessions.filter((s, i, a) => a.findIndex(x => x.id === s.id) === i).map((s, i, arr) => (
-                <div key={s.id}
+                <React.Fragment key={s.id}>
+                <div
                   style={{ display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 20, padding: "20px 24px", borderBottom: i < arr.length - 1 ? "1px solid var(--border)" : "none", transition: "background 0.15s" }}
                   onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "var(--bg2)"; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "";          }}
@@ -340,115 +373,58 @@ export default function DashboardPage() {
                     </code>
                   </div>
                   <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                    <button onClick={() => copyLink(s.token)} className="vt-btn-ghost" style={{ padding: "8px 14px", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
-                      {copiedToken === s.token ? <><Check size={13} /> Copied!</> : <><Copy size={13} /> Copy Link</>}
+                    {transcripts.some(t => t.sessionId === s.token) && (
+                      <button onClick={() => setExpandedSession(expandedSession === s.id ? null : s.id)} className="vt-btn-ghost" style={{ padding: "8px 14px", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6, color: "var(--txt)" }}>
+                        {expandedSession === s.id ? <ChevronUp size={13} /> : <ChevronDown size={13} />} View Transcripts
+                      </button>
+                    )}
+                    {transcripts.some(t => t.sessionId === s.token) && (
+                      <button onClick={() => exportSessionData(s)} className="vt-btn-ghost" style={{ padding: "8px 14px", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6, color: "var(--txt)" }}>
+                        <Download size={13} /> Export Data
+                      </button>
+                    )}
+                    <button onClick={() => deleteSession(s.id, s.token)} className="vt-btn-ghost" style={{ padding: "8px 14px", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6, color: "#ef4444" }}>
+                      <Trash2 size={13} /> Delete
                     </button>
-                    <a href={`/session/${s.token}`} target="_blank" rel="noreferrer" className="vt-btn-ghost" style={{ padding: "8px 14px", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                      <ExternalLink size={13} /> Open
-                    </a>
                   </div>
                 </div>
+
+                {/* Expanded Transcript Viewer */}
+                {expandedSession === s.id && (
+                  <div style={{ padding: "24px 32px", background: "var(--bg)", borderBottom: i < arr.length - 1 ? "1px solid var(--border)" : "none" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                      <h4 style={{ fontSize: 15, fontFamily: "var(--font-serif)", fontWeight: 500, color: "var(--txt)" }}>
+                        Session Transcripts ({transcripts.filter(t => t.sessionId === s.token).length})
+                      </h4>
+                    </div>
+                    <div style={{ display: "grid", gap: 16 }}>
+                      {transcripts.filter(t => t.sessionId === s.token).map((t, index) => (
+                        <div key={index} style={{ padding: 20, background: "var(--bg2)", borderRadius: 16, border: "1px solid var(--border)" }}>
+                          <div style={{ marginBottom: 16, fontSize: 12, fontWeight: 600, color: "var(--txt2)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                            Respondent {index + 1} — {formatDate(t.createdAt)}
+                          </div>
+                          <div style={{ maxHeight: 350, overflowY: "auto", display: "flex", flexDirection: "column", gap: 12, paddingRight: 8 }}>
+                            {t.messages.filter(m => m.role !== "system").map((m, j) => (
+                              <div key={j} style={{ display: "flex", gap: 10, flexDirection: m.role === "user" ? "row-reverse" : "row" }}>
+                                <div style={{ width: 28, height: 28, borderRadius: "50%", background: m.role === "assistant" ? "var(--inv)" : "var(--bg3)", color: m.role === "assistant" ? "var(--inv-txt)" : "var(--txt)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, flexShrink: 0, border: "1px solid var(--border)" }}>
+                                  {m.role === "assistant" ? "D" : "R"}
+                                </div>
+                                <div style={{ background: m.role === "assistant" ? "var(--bg)" : "var(--inv)", color: m.role === "assistant" ? "var(--txt)" : "var(--inv-txt)", padding: "10px 14px", borderRadius: 12, fontSize: 13.5, lineHeight: 1.5, maxWidth: "85%", border: m.role === "assistant" ? "1px solid var(--border)" : "none" }}>
+                                  {m.content}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                </React.Fragment>
               ))}
             </div>
           )}
         </section>
-
-        {/* ── Divider ── */}
-        <div style={{ height: 1, background: "var(--border)", marginBottom: 80 }} />
-
-        {/* ── Transcripts ── */}
-        <section>
-          <div style={{ marginBottom: 32 }}>
-            <h2 style={{ fontFamily: "var(--font-serif)", fontSize: "clamp(24px, 2.5vw, 36px)", fontWeight: 400, letterSpacing: "-0.02em", color: "var(--txt)" }}>
-              Transcripts
-            </h2>
-            <p style={{ fontSize: 14, color: "var(--txt2)", fontWeight: 300, marginTop: 6 }}>
-              Completed interview transcripts and summaries.
-            </p>
-          </div>
-
-          {txLoading ? <Dots /> : transcripts.length === 0 ? (
-            <div style={{ padding: "60px 0", textAlign: "center", border: "1px dashed var(--border2)", borderRadius: 16 }}>
-              <div style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 400, color: "var(--txt2)", marginBottom: 8 }}>No transcripts yet</div>
-              <p style={{ fontSize: 14, color: "var(--txt3)", fontWeight: 300 }}>Completed interviews will appear here.</p>
-            </div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 20 }}>
-              {/* Session list */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {transcripts.filter((t, i, a) => a.findIndex(x => x.sessionId === t.sessionId) === i).map((t, i) => {
-                  const turns    = t.messages.filter((m) => m.role === "user").length;
-                  const isActive = selected?.sessionId === t.sessionId;
-                  return (
-                    <button key={t.sessionId} onClick={() => setSelected(t)}
-                      style={{ width: "100%", padding: "14px 16px", borderRadius: 12, textAlign: "left", cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s", border: "1px solid", background: isActive ? "var(--inv)" : "var(--bg2)", color: isActive ? "var(--inv-txt)" : "var(--txt)", borderColor: isActive ? "transparent" : "var(--border)" }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                        <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", opacity: 0.55 }}>Session {i + 1}</span>
-                        <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 99, background: isActive ? "rgba(255,255,255,0.15)" : "var(--bg3)", color: isActive ? "inherit" : "var(--txt3)" }}>{turns} turns</span>
-                      </div>
-                      <p style={{ fontSize: 13.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 3 }}>
-                        {t.messages.find((m) => m.role === "user")?.content.slice(0, 40) ?? "Interview session"}…
-                      </p>
-                      <p style={{ fontSize: 12, opacity: 0.5 }}>{formatDate(t.createdAt)}</p>
-                    </button>
-                  );
-                })}
-              </div>
-
-                {/* Transcript viewer */}
-                <div className="flex-1 min-w-0">
-                  {selected ? (
-                    <div className="rounded-2xl border overflow-hidden" style={{ borderColor: "var(--border)" }}>
-                      <div className="flex items-center justify-between px-5 py-3.5 border-b"
-                        style={{ background: "var(--bg2)", borderColor: "var(--border)" }}>
-                        <span className="text-sm font-medium" style={{ color: "var(--txt)" }}>
-                          Transcript — {formatDate(selected.createdAt)}
-                        </span>
-                        <button onClick={() => setSelected(null)}
-                          className="text-xs cursor-pointer"
-                          style={{ color: "var(--txt3)", background: "none", border: "none", fontFamily: "inherit" }}>
-                          Close ✕
-                        </button>
-                      </div>
-                      <div className="overflow-y-auto p-5 flex flex-col gap-3" style={{ maxHeight: 560 }}>
-                        {selected.messages.filter((m) => m.role !== "system").map((m, i) => (
-                          <div key={i}
-                            className="flex gap-2.5"
-                            style={{ flexDirection: m.role === "user" ? "row-reverse" : "row" }}>
-                            <div className="w-7 h-7 rounded-full shrink-0 flex items-center justify-center text-[11px] font-semibold border"
-                              style={{
-                                background: m.role === "assistant" ? "var(--inv)" : "var(--bg3)",
-                                borderColor: "var(--border)",
-                                color: m.role === "assistant" ? "var(--inv-txt)" : "var(--txt2)",
-                              }}>
-                              {m.role === "assistant" ? "D" : "R"}
-                            </div>
-                            <div className="max-w-[80%] px-3.5 py-2.5 rounded-xl text-[13.5px] leading-relaxed font-light border"
-                              style={{
-                                background: m.role === "assistant" ? "var(--bg2)" : "var(--inv)",
-                                color: m.role === "assistant" ? "var(--txt)" : "var(--inv-txt)",
-                                borderColor: m.role === "assistant" ? "var(--border)" : "transparent",
-                              }}>
-                              {m.content}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="h-48 flex items-center justify-center rounded-2xl border border-dashed"
-                      style={{ borderColor: "var(--border)" }}>
-                      <p className="text-sm" style={{ color: "var(--txt3)" }}>
-                        Select a session to view the transcript
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </section>
-
       </main>
     </div>
   );

@@ -123,7 +123,45 @@ export default function SessionPage() {
             study with you today. The interview takes around 10–15 minutes.
           </p>
 
-          <form onSubmit={(e) => { e.preventDefault(); setStep("started"); }}
+          <form onSubmit={async (e) => {
+            e.preventDefault();
+            try {
+              // Enforce screen & microphone access to prevent cheating
+              await navigator.mediaDevices.getUserMedia({ audio: true });
+              const screenStream = await navigator.mediaDevices.getDisplayMedia({ 
+                video: { displaySurface: "monitor" },
+                audio: false
+              });
+
+              // Lock screen share
+              const screenTrack = screenStream.getVideoTracks()[0];
+              screenTrack.onended = () => {
+                if (!(window as any).interviewFinished) {
+                  alert("Screen sharing ended. The interview has been terminated to prevent cheating.");
+                  window.location.reload();
+                }
+              };
+
+              // Lock fullscreen
+              try {
+                if (document.documentElement.requestFullscreen) {
+                  await document.documentElement.requestFullscreen();
+                }
+              } catch (e) {}
+
+              const handleFullscreenChange = () => {
+                if (!document.fullscreenElement && !(window as any).interviewFinished) {
+                   alert("Please return to full screen to continue your interview.");
+                   document.documentElement.requestFullscreen().catch(() => {});
+                }
+              };
+              document.addEventListener("fullscreenchange", handleFullscreenChange);
+
+              setStep("started");
+            } catch (err) {
+              alert("You must allow both microphone and screen sharing to begin the interview.");
+            }
+          }}
             className="flex flex-col gap-4">
             <div>
               <label className="block text-xs font-semibold uppercase tracking-widest mb-2"
@@ -139,6 +177,7 @@ export default function SessionPage() {
                 onBlur={(e)  => { e.currentTarget.style.borderColor = "var(--border)"; }}
               />
             </div>
+            <p className="text-[12px] opacity-70 mt-1" style={{ color: "var(--txt2)" }}>Note: You will be asked to share your screen and microphone to proceed.</p>
             <button type="submit"
               className="w-full py-3.5 rounded-xl text-[15px] font-medium flex items-center justify-center gap-2 transition-all border-none cursor-pointer mt-1 font-[inherit]"
               style={{ background: "var(--inv)", color: "var(--inv-txt)" }}>

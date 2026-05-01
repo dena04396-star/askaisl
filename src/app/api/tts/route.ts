@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { streamTTS } from "@/lib/speech/elevenlabs";
 import * as googleTTS from "google-tts-api";
 
 export const runtime = "nodejs";
@@ -16,21 +15,49 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      const elevenResp = await streamTTS(
-        // Truncate to 5000 chars – ElevenLabs enforces a per-request text limit
-        text.slice(0, 5000),
-        { voiceId, language }
-      );
+      const token = process.env.SPEECHGEN_TOKEN;
+      const email = process.env.SPEECHGEN_EMAIL;
 
-      const stream = elevenResp.body;
-      return new NextResponse(stream, {
-        headers: {
-          "Content-Type": "audio/mpeg",
-          "Transfer-Encoding": "chunked",
-        },
+      if (!token || !email) {
+        throw new Error("Missing SPEECHGEN_TOKEN or SPEECHGEN_EMAIL");
+      }
+
+      // Fallback voice selection for Sinhala and English
+      let defaultVoice = "Matthew plus";
+      if (language === "si") defaultVoice = "Amaya"; // Or whichever Sinhala voice SpeechGen provides
+      if (language === "ta") defaultVoice = "Nila";  // Example Tamil voice
+
+      const data = new URLSearchParams({
+        token,
+        email,
+        voice: voiceId || defaultVoice,
+        text: text.slice(0, 2000), // SpeechGen /text endpoint max limit is 2000
+        format: "mp3",
       });
-    } catch (elevenError) {
-      console.error("[/api/tts] ElevenLabs failed, using fallback");
+
+      const response = await fetch("https://speechgen.io/index.php?r=api/text", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: data.toString(),
+      });
+
+      const result = await response.json();
+
+      if (result.status === 1 && result.file) {
+        // Fetch the generated MP3 file and stream it directly back to the client
+        const audioRes = await fetch(result.file);
+        
+        return new NextResponse(audioRes.body, {
+          headers: {
+            "Content-Type": "audio/mpeg",
+            "Transfer-Encoding": "chunked",
+          },
+        });
+      } else {
+        throw new Error(result.error || "SpeechGen API failed");
+      }
+    } catch (apiError) {
+      console.error("[/api/tts] SpeechGen failed, using google fallback:", apiError);
       
       const prefix = (language || "en").split("-")[0];
       const b64Parts = await googleTTS.getAllAudioBase64(text.slice(0, 5000), {
