@@ -52,6 +52,68 @@ async function playTTS(
   try {
     const res = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
     if (!res.ok) throw new Error(`TTS ${res.status}`);
+<<<<<<< Updated upstream
+=======
+    
+    const contentType = res.headers.get("Content-Type") || "";
+    if (contentType.includes("application/json")) {
+      const data = await res.json();
+      if (data.fallback && data.chunks && data.chunks.length > 0) {
+        let currentIdx = 0;
+        let currentAudio: HTMLAudioElement | null = null;
+        let isCancelled = false;
+
+        let audioCtx: AudioContext | null = null;
+        if (analyserRef && typeof AudioContext !== "undefined") {
+          try { audioCtx = new AudioContext(); } catch { /* ignore */ }
+        }
+
+        const urls = data.chunks.map((b64: string) => `data:audio/mpeg;base64,${b64}`);
+
+        const playNext = () => {
+          if (isCancelled) return;
+          if (currentIdx >= urls.length) {
+            if (analyserRef) analyserRef.current = null;
+            audioCtx?.close().catch(() => {});
+            onWord?.(total);
+            onEnd();
+            return;
+          }
+
+          currentAudio = new Audio(urls[currentIdx]);
+          
+          if (audioCtx && analyserRef) {
+            try {
+              const src = audioCtx.createMediaElementSource(currentAudio);
+              const node = audioCtx.createAnalyser(); 
+              node.fftSize = 256;
+              src.connect(node); 
+              node.connect(audioCtx.destination);
+              analyserRef.current = node;
+            } catch { /* ignore */ }
+          }
+
+          if (currentIdx === 0) onStart();
+
+          currentAudio.onended = () => { currentIdx++; playNext(); };
+          currentAudio.onerror = () => { currentIdx++; playNext(); };
+          currentAudio.play().catch(() => { currentIdx++; playNext(); });
+        };
+
+        playNext();
+
+        return () => {
+          isCancelled = true;
+          if (currentAudio) currentAudio.pause();
+          if (analyserRef) analyserRef.current = null;
+          audioCtx?.close().catch(() => {});
+          onWord?.(total);
+          onEnd();
+        };
+      }
+    }
+
+>>>>>>> Stashed changes
     const url = URL.createObjectURL(await res.blob());
     const audio = new Audio(url);
     audio.onplay = onStart;
@@ -269,13 +331,14 @@ function renderSummary(text: string) {
   });
 }
 
-function SummaryScreen({ summary, isSummarizing, study, respondent, messages, onReset }: {
+function SummaryScreen({ summary, isSummarizing, study, respondent, messages, onReset, isRespondentMode }: {
   summary: string | null;
   isSummarizing: boolean;
   study?: StudyContext;
   respondent?: RespondentDetails;
   messages: import("@/types").ChatMessage[];
   onReset: () => void;
+  isRespondentMode?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -300,6 +363,22 @@ function SummaryScreen({ summary, isSummarizing, study, respondent, messages, on
   };
 
   const studyLabel = STUDY_OPTIONS.find((s) => s.id === study?.studyType)?.label;
+
+  if (isRespondentMode) {
+    return (
+      <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ textAlign: "center", maxWidth: 440 }}>
+          <div style={{ width: 48, height: 48, borderRadius: 12, background: "var(--inv)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
+            <svg viewBox="0 0 12 12" fill="none" width={24} height={24}><path d="M2 10L6 2l4 8" stroke="var(--inv-txt)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </div>
+          <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 32, fontWeight: 400, color: "var(--txt)", marginBottom: 16 }}>Interview Complete</h1>
+          <p style={{ fontSize: 15, color: "var(--txt2)", lineHeight: 1.6, fontWeight: 300 }}>
+            Thank you for participating! You have finished the interview. You can safely close this screen now. Your results will be processed and sent via mail.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)", display: "grid", gridTemplateColumns: "220px 1fr" }}>
@@ -384,6 +463,11 @@ export interface PreConfig {
   language: Locale;
   productCategory: string;
   respondentName?: string;
+<<<<<<< Updated upstream
+=======
+  customGuide?: string | null;
+  sessionToken?: string;
+>>>>>>> Stashed changes
 }
 
 export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) {
@@ -433,6 +517,11 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
       preConfig.language,
       { productCategory: preConfig.productCategory, studyType: preConfig.studyType },
       respondentDetails,
+<<<<<<< Updated upstream
+=======
+      preConfig.customGuide,
+      preConfig.sessionToken
+>>>>>>> Stashed changes
     );
   }, [preConfig, status, startInterview]);
 
@@ -512,7 +601,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
       </div>
     </div>
   );
-  if (status === "finished") return <SummaryScreen summary={summary} isSummarizing={isSummarizing} study={study} respondent={respondent} messages={messages} onReset={reset} />;
+  if (status === "finished") return <SummaryScreen summary={summary} isSummarizing={isSummarizing} study={study} respondent={respondent} messages={messages} onReset={reset} isRespondentMode={!!preConfig} />;
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 400px", height: "100vh", overflow: "hidden" }}>
@@ -530,6 +619,17 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
             <span style={{ fontSize: 13, color: "rgba(255,255,255,0.45)" }}>{timerStr}</span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
+            {!preConfig && (
+              <button
+                title="Delete Session"
+                onClick={reset}
+                style={{ width: 32, height: 32, borderRadius: 8, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.5)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.18)"; e.currentTarget.style.color = "#f87171"; e.currentTarget.style.borderColor = "rgba(239,68,68,0.35)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.5)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)"; }}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"></path></svg>
+              </button>
+            )}
             <button
               title="End session"
               onClick={endInterview}

@@ -66,6 +66,11 @@ export default function SessionPage() {
           language:        session.language   as Locale,
           productCategory: session.product_category,
           respondentName:  name || undefined,
+<<<<<<< Updated upstream
+=======
+          customGuide:     session.discussion_guide,
+          sessionToken:    session.token,
+>>>>>>> Stashed changes
         }}
       />
     );

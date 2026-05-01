@@ -5,6 +5,17 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Environment, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 
+if (typeof console !== "undefined") {
+  const originalWarn = console.warn;
+  console.warn = (...args) => {
+    if (typeof args[0] === "string" && (
+      args[0].includes("THREE.WebGLShadowMap: PCFSoftShadowMap") ||
+      args[0].includes("THREE.Clock: This module has been deprecated")
+    )) return;
+    originalWarn(...args);
+  };
+}
+
 export interface Avatar3DProps {
   isSpeaking: boolean;
   isListening?: boolean;

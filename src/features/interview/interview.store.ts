@@ -35,7 +35,7 @@ export function useInterviewStore() {
   const [status, setStatus] = useState<InterviewStatus>("idle");
   const [isLoading, setIsLoading] = useState(false);
   const [isSummarizing, setIsSummarizing] = useState(false);
-  const [sessionId] = useState(() => generateId());
+  const [sessionId, setSessionId] = useState(() => generateId());
   const [language, setLanguage] = useState<Locale>("en");
   const [study, setStudy] = useState<StudyContext | undefined>();
   const [respondent, setRespondent] = useState<RespondentDetails | undefined>();
@@ -43,7 +43,13 @@ export function useInterviewStore() {
   const [showClosingBanner, setShowClosingBanner] = useState(false);
 
   const startInterview = useCallback(
+<<<<<<< Updated upstream
     async (lang: Locale, ctx: StudyContext, respondentDetails?: RespondentDetails) => {
+=======
+    async (lang: Locale, ctx: StudyContext, respondentDetails?: RespondentDetails, guide?: string | null, sessionToken?: string) => {
+      const activeSessionId = sessionToken || sessionId;
+      if (sessionToken) setSessionId(sessionToken);
+>>>>>>> Stashed changes
       setLanguage(lang);
       setStudy(ctx);
       setRespondent(respondentDetails);
@@ -51,9 +57,8 @@ export function useInterviewStore() {
       setIsLoading(true);
       setShowClosingBanner(false);
       try {
-        /* Buffer silently — message reveals in sync with TTS */
         let streamedText = "";
-        const raw = await sendMessage([], lang, sessionId, ctx, (chunk) => {
+        const raw = await sendMessage([], lang, activeSessionId, ctx, (chunk) => {
           streamedText += chunk;
         });
 
@@ -74,7 +79,6 @@ export function useInterviewStore() {
       setMessages(next);
       setIsLoading(true);
       try {
-        /* Buffer silently — message reveals in sync with TTS */
         let streamedText = "";
         const raw = await sendMessage(next, language, sessionId, study, (chunk) => {
           streamedText += chunk;
@@ -94,6 +98,7 @@ export function useInterviewStore() {
   const endInterview = useCallback(async () => {
     setStatus("finished");
     setIsSummarizing(true);
+<<<<<<< Updated upstream
     const transcript = messages
       .map((m) =>
         m.role === "assistant"
@@ -101,12 +106,43 @@ export function useInterviewStore() {
           : `Respondent: ${m.content}`
       )
       .join("\n\n");
+=======
+    
+>>>>>>> Stashed changes
     try {
+      // Save transcript to database
+      fetch("/api/transcript", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, messages }),
+      }).catch(console.error);
+
+      const transcript = messages
+        .map((m) =>
+          m.role === "assistant"
+            ? `Mrs Dissanayake: ${m.content}`
+            : `Respondent: ${m.content}`
+        )
+        .join("\n\n");
+
+      const meta = [
+        respondent?.name       ? `Name: ${respondent.name}`             : null,
+        respondent?.age        ? `Age: ${respondent.age}`               : null,
+        respondent?.gender     ? `Gender: ${respondent.gender}`         : null,
+        respondent?.district   ? `District: ${respondent.district}`     : null,
+        respondent?.occupation ? `Occupation: ${respondent.occupation}` : null,
+      ].filter(Boolean).join(" | ");
+
+      const fullTranscript = meta
+        ? `[Respondent Profile: ${meta}]\n\n${transcript}`
+        : transcript;
+        
       const res = await fetch("/api/summary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transcript, respondent }),
       });
+      
       if (res.ok) {
         const { summary: raw } = await res.json();
         setSummary(raw);
@@ -116,7 +152,7 @@ export function useInterviewStore() {
     } finally {
       setIsSummarizing(false);
     }
-  }, [messages, respondent]);
+  }, [messages, respondent, sessionId]);
 
   const reset = useCallback(() => {
     setMessages([]);
