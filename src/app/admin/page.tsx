@@ -1,9 +1,19 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { getBrowserClient } from "@/lib/auth/client";
+
+async function adminHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
+  const { data: { session } } = await getBrowserClient().auth.getSession();
+  return {
+    "Authorization": `Bearer ${session?.access_token ?? ""}`,
+    "Content-Type": "application/json",
+    ...extra,
+  };
+}
 
 interface AdminSession {
   id: string;
@@ -65,29 +75,33 @@ export default function AdminPage() {
   const isAdmin = !!user && user.email === adminEmail;
 
   const fetchSessions = useCallback(async () => {
-    if (!user?.email) return;
     setFetching(true);
-    const res = await fetch("/api/admin/sessions", {
-      headers: { "x-admin-email": user.email },
-    });
+    const res = await fetch("/api/admin/sessions", { headers: await adminHeaders() });
     if (res.ok) setSessions(await res.json());
     setFetching(false);
-  }, [user?.email]);
+  }, []);
+
+  const fetchRef = useRef(fetchSessions);
+  useEffect(() => { fetchRef.current = fetchSessions; }, [fetchSessions]);
 
   useEffect(() => {
-    if (!loading && !user) { router.replace("/login"); return; }
-    if (!loading && user && !isAdmin) { router.replace("/dashboard"); return; }
-    if (user && isAdmin) fetchSessions();
-  }, [user, loading, isAdmin, router, fetchSessions]);
+    if (loading) return;
+    if (!user)    { router.replace("/login");     return; }
+    if (!isAdmin) { router.replace("/dashboard"); return; }
+  }, [user, loading, isAdmin, router]);
+
+  useEffect(() => {
+    if (user && isAdmin) void fetchRef.current();
+  }, [user, isAdmin]);
 
   async function patchStatus(id: string, status: "active" | "closed") {
     setActionId(id);
     await fetch("/api/admin/sessions", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", "x-admin-email": user!.email! },
+      headers: await adminHeaders(),
       body: JSON.stringify({ id, status }),
     });
-    await fetchSessions();
+    await fetchRef.current();
     setActionId(null);
   }
 
@@ -96,7 +110,7 @@ export default function AdminPage() {
     setActionId(id);
     await fetch("/api/admin/sessions", {
       method: "DELETE",
-      headers: { "Content-Type": "application/json", "x-admin-email": user!.email! },
+      headers: await adminHeaders(),
       body: JSON.stringify({ id }),
     });
     setSessions(s => s.filter(x => x.id !== id));
@@ -122,6 +136,9 @@ export default function AdminPage() {
             Admin
           </span>
           <span style={{ fontSize: 13, color: "var(--txt2)" }}>{user.email}</span>
+          <Link href="/admin/analytics" style={{ fontSize: 13, color: "var(--txt2)", textDecoration: "none", padding: "6px 14px", borderRadius: 8, border: "1px solid var(--border)", fontWeight: 500 }}>
+            Analytics
+          </Link>
           <Link href="/dashboard" style={{ fontSize: 13, color: "var(--txt2)", textDecoration: "none", padding: "6px 14px", borderRadius: 8, border: "1px solid var(--border)", fontWeight: 500 }}>
             Dashboard
           </Link>

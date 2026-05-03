@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
       const voiceMap: Record<string, string> = { si: "Thilini", ta: "Saranya", en: "Neerja" };
       const defaultVoice = voiceId || voiceMap[prefix] || "Neerja";
 
-      const pitchMap: Record<string, string> = { si: "20", ta: "20", en: "5" };
+      const pitchMap: Record<string, string> = { si: "0", ta: "0", en: "5" };
 
       const data = new URLSearchParams({
         token,
