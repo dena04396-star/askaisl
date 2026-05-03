@@ -15,6 +15,8 @@ export async function POST(req: NextRequest) {
     }
 
     try {
+      const prefix = (language || "en").split("-")[0];
+
       const token = process.env.SPEECHGEN_TOKEN;
       const email = process.env.SPEECHGEN_EMAIL;
 
@@ -22,17 +24,19 @@ export async function POST(req: NextRequest) {
         throw new Error("Missing SPEECHGEN_TOKEN or SPEECHGEN_EMAIL");
       }
 
-      // Fallback voice selection for Sinhala and English
-      let defaultVoice = "Matthew plus";
-      if (language === "si") defaultVoice = "Amaya"; // Or whichever Sinhala voice SpeechGen provides
-      if (language === "ta") defaultVoice = "Nila";  // Example Tamil voice
+      const voiceMap: Record<string, string> = { si: "Thilini", ta: "Saranya", en: "Neerja" };
+      const defaultVoice = voiceId || voiceMap[prefix] || "Neerja";
+
+      const pitchMap: Record<string, string> = { si: "20", ta: "20", en: "5" };
 
       const data = new URLSearchParams({
         token,
         email,
-        voice: voiceId || defaultVoice,
-        text: text.slice(0, 2000), // SpeechGen /text endpoint max limit is 2000
+        voice: defaultVoice,
+        text: text.slice(0, 2000),
         format: "mp3",
+        speed: "1",
+        pitch: pitchMap[prefix] ?? "5",
       });
 
       const response = await fetch("https://speechgen.io/index.php?r=api/text", {
@@ -57,7 +61,8 @@ export async function POST(req: NextRequest) {
         throw new Error(result.error || "SpeechGen API failed");
       }
     } catch (apiError) {
-      console.error("[/api/tts] SpeechGen failed, using google fallback:", apiError);
+      if ((apiError as Error).message !== "use-google-tts")
+        console.warn("[/api/tts] SpeechGen unavailable, using Google TTS:", (apiError as Error).message);
       
       const prefix = (language || "en").split("-")[0];
       const b64Parts = await googleTTS.getAllAudioBase64(text.slice(0, 5000), {

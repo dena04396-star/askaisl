@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { getBrowserClient } from "@/lib/auth/client";
 import type { SessionRow, StudyType, Locale } from "@/types";
@@ -70,12 +69,11 @@ export default function SessionPage() {
     <div className="min-h-screen flex flex-col items-center justify-center px-5 py-10"
       style={{ background: "var(--bg)" }}>
 
-      {/* Logo */}
-      <Link href="/"
-        className="flex items-center gap-2 no-underline font-medium text-xl mb-12"
+      {/* Logo — not a link during consent so respondent can't navigate away */}
+      <div className="flex items-center gap-2 font-medium text-xl mb-12"
         style={{ fontFamily: "var(--font-serif)", color: "var(--txt)" }}>
         <LogoMark /> vinterview
-      </Link>
+      </div>
 
       {/* Loading */}
       {step === "loading" && (

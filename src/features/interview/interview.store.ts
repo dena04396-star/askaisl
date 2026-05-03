@@ -42,6 +42,7 @@ export function useInterviewStore() {
   const [customGuide, setCustomGuide] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
   const [showClosingBanner, setShowClosingBanner] = useState(false);
+  const [hasSaved, setHasSaved] = useState(false);
 
   const startInterview = useCallback(
     async (lang: Locale, ctx: StudyContext, respondentDetails?: RespondentDetails, guide?: string | null, sessionToken?: string) => {
@@ -109,12 +110,18 @@ export function useInterviewStore() {
       .join("\n\n");
 
     try {
-      // Save transcript to database
-      fetch("/api/transcript", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, messages }),
-      }).catch(console.error);
+      // Save transcript to database only once
+      if (!hasSaved) {
+        setHasSaved(true);
+        fetch("/api/transcript", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, messages }),
+        }).catch((err) => {
+          console.error("[interview.store] save error:", err);
+          setHasSaved(false); // retry allowed on failure
+        });
+      }
 
       const transcript = messages
         .map((m) =>
@@ -163,6 +170,7 @@ export function useInterviewStore() {
     setRespondent(undefined);
     setCustomGuide(null);
     setShowClosingBanner(false);
+    setHasSaved(false);
   }, []);
 
   return {

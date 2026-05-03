@@ -1,160 +1,116 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import StreamingAvatar, {
-  AvatarQuality,
-  StreamingEvents,
-  TaskType,
-  VoiceEmotion,
-} from "@heygen/streaming-avatar";
+import { useEffect, useRef, useState } from "react";
+import StreamingAvatar, { StreamingEvents, TaskType, AvatarQuality, ElevenLabsModel } from "@heygen/streaming-avatar";
 
-export interface HeyGenAvatarProps {
-  /** Text to speak. Pass a new string (even same content) to trigger speech. */
-  speakText: string | null;
-  /** BCP-47 locale, e.g. "en-US", "si-LK", "ta-IN" */
-  language: string;
-  onSpeakStart?: () => void;
-  onSpeakEnd?: () => void;
-  onReady?: () => void;
+interface Props {
+  speakText:      string | null;
+  language?:      string;
+  onSpeakStart?:  () => void;
+  onSpeakEnd?:    () => void;
+  onReady?:       () => void;
+  onFail?:        () => void;
+  onAvatarReady?: (handlesAudio: boolean) => void;
 }
 
-/* HeyGen locale → ISO-639-1 that HeyGen accepts */
-function toHeyGenLang(bcp47: string): string {
-  const prefix = bcp47.split("-")[0].toLowerCase();
-  const MAP: Record<string, string> = {
-    si: "en", // Sinhala not natively supported; fall back to English voice
-    ta: "en", // Tamil not natively supported
-    en: "en",
-  };
-  return MAP[prefix] ?? "en";
-}
-
-export default function HeyGenAvatar({
+export default function HeyGenStreamingAvatar({
   speakText,
   language,
   onSpeakStart,
   onSpeakEnd,
   onReady,
-}: HeyGenAvatarProps) {
+  onFail,
+  onAvatarReady,
+}: Props) {
   const videoRef    = useRef<HTMLVideoElement>(null);
   const avatarRef   = useRef<StreamingAvatar | null>(null);
-  const [ready,     setReady]     = useState(false);
-  const [initError, setInitError] = useState(false);
   const lastTextRef = useRef<string | null>(null);
+  const [connected, setConnected] = useState(false);
 
-  /* ── Initialise session once on mount ── */
   useEffect(() => {
-    let alive = true;
+    let destroyed = false;
 
     async function init() {
       try {
         const res = await fetch("/api/heygen/token", { method: "POST" });
-        if (!res.ok) throw new Error("token fetch failed");
+        if (!res.ok) throw new Error(`Token ${res.status}`);
         const { token } = await res.json();
-        if (!token) throw new Error("no token");
 
         const avatar = new StreamingAvatar({ token });
         avatarRef.current = avatar;
 
-        avatar.on(StreamingEvents.STREAM_READY, (e: CustomEvent<MediaStream>) => {
-          if (videoRef.current) {
-            videoRef.current.srcObject = e.detail;
+        avatar.on(StreamingEvents.STREAM_READY, () => {
+          if (destroyed) return;
+          if (videoRef.current && avatar.mediaStream) {
+            videoRef.current.srcObject = avatar.mediaStream;
             videoRef.current.play().catch(() => {});
           }
-          if (alive) { setReady(true); onReady?.(); }
+          setConnected(true);
+          onReady?.();
+          onAvatarReady?.(true);
         });
 
-        avatar.on(StreamingEvents.AVATAR_START_TALKING, () => { if (alive) onSpeakStart?.(); });
-        avatar.on(StreamingEvents.AVATAR_STOP_TALKING,  () => { if (alive) onSpeakEnd?.();   });
+        avatar.on(StreamingEvents.AVATAR_START_TALKING, () => onSpeakStart?.());
+        avatar.on(StreamingEvents.AVATAR_STOP_TALKING,  () => onSpeakEnd?.());
 
         avatar.on(StreamingEvents.STREAM_DISCONNECTED, () => {
-          if (alive) setReady(false);
+          if (!destroyed) setConnected(false);
         });
 
-        await avatar.createStartAvatar({
+        const avatarId = process.env.NEXT_PUBLIC_HEYGEN_AVATAR_ID || "";
+        const voiceId  = process.env.NEXT_PUBLIC_HEYGEN_VOICE_ID  || "";
+
+        await avatar.newSession({
           quality:    AvatarQuality.High,
-          avatarName: process.env.NEXT_PUBLIC_HEYGEN_AVATAR_ID ?? "default",
-          voice: {
-            voiceId:  process.env.NEXT_PUBLIC_HEYGEN_VOICE_ID,
-            rate:     1.0,
-            emotion:  VoiceEmotion.FRIENDLY,
-          },
-          language: toHeyGenLang(language),
-          disableIdleTimeout: false,
+          avatarName: avatarId,
+          voice: voiceId ? {
+            voiceId,
+            model: ElevenLabsModel.eleven_multilingual_v2,
+          } : undefined,
+          language: (language || "en").split("-")[0],
         });
       } catch (err) {
-        console.error("[HeyGenAvatar] init error:", err);
-        if (alive) setInitError(true);
+        console.error("[HeyGen] init failed:", err);
+        if (!destroyed) {
+          onFail?.();
+          onAvatarReady?.(false);
+        }
       }
     }
 
     init();
 
     return () => {
-      alive = false;
+      destroyed = true;
       avatarRef.current?.stopAvatar().catch(() => {});
       avatarRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── Speak when speakText changes ── */
+  /* Speak when new text arrives */
   useEffect(() => {
-    if (!speakText || !ready || !avatarRef.current) return;
-    if (speakText === lastTextRef.current) return;
+    if (!speakText || speakText === lastTextRef.current || !connected || !avatarRef.current) return;
     lastTextRef.current = speakText;
-
-    avatarRef.current
-      .speak({ text: speakText, task_type: TaskType.TALK })
-      .catch((err) => console.error("[HeyGenAvatar] speak error:", err));
-  }, [speakText, ready]);
-
-  /* ── Fallback if HeyGen fails to initialise ── */
-  if (initError) {
-    return (
-      <div style={{
-        position: "absolute", inset: 0,
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        background: "#0d0d0f", gap: 12,
-      }}>
-        <div style={{ width: 80, height: 80, borderRadius: "50%", background: "#1a1a1f", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="8" r="4" fill="rgba(255,255,255,0.25)" />
-            <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke="rgba(255,255,255,0.20)" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
-        </div>
-        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>Avatar unavailable</span>
-      </div>
-    );
-  }
+    avatarRef.current.speak({ text: speakText, task_type: TaskType.REPEAT }).catch(console.error);
+  }, [speakText, connected]);
 
   return (
-    <div style={{ position: "absolute", inset: 0, background: "#0d0d0f" }}>
-      {/* Loading shimmer while session starts */}
-      {!ready && (
-        <div style={{
-          position: "absolute", inset: 0, zIndex: 2,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          background: "#0d0d0f",
-        }}>
+    <div style={{ width: "100%", height: "100%", background: "#000", position: "relative" }}>
+      {!connected && (
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "#0d0d0f" }}>
           <div style={{ display: "flex", gap: 6 }}>
-            <span className="td" /><span className="td td-2" /><span className="td td-3" />
+            <span className="td" />
+            <span className="td td-2" />
+            <span className="td td-3" />
           </div>
         </div>
       )}
-
       <video
         ref={videoRef}
         autoPlay
         playsInline
-        muted={false}
-        style={{
-          width: "100%", height: "100%",
-          objectFit: "cover",
-          display: "block",
-          opacity: ready ? 1 : 0,
-          transition: "opacity 0.6s ease",
-        }}
+        style={{ width: "100%", height: "100%", objectFit: "cover", opacity: connected ? 1 : 0, transition: "opacity 0.4s" }}
       />
     </div>
   );

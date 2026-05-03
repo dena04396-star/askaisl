@@ -9,10 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@heygen/liveavatar-web-sdk": "^0.0.17",
     "@heygen/streaming-avatar": "^2.1.0",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.0",
     "@supabase/supabase-js": "^2.105.0",
+    "docx": "^9.6.1",
     "google-tts-api": "^2.0.2",
     "lucide-react": "^1.11.0",
     "next": "16.2.4",
@@ -20,7 +22,8 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "three": "^0.184.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "xlsx-js-style": "^1.2.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

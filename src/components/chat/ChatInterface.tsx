@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, startTransition } from "react";
-import { Mic, MicOff, Send, PhoneOff, Copy, Check, Download, Plus, ChevronRight, User } from "lucide-react";
-import * as XLSX from "xlsx";
+import { Mic, MicOff, Send, PhoneOff, Copy, Check, Download, Plus, ChevronRight, User, FileText } from "lucide-react";
+import * as XLSX from "xlsx-js-style";
 import MessageBubble from "./MessageBubble";
 import { Button } from "@/components/ui/Button";
 import { useInterviewStore } from "@/features/interview/interview.store";
@@ -395,16 +395,27 @@ function SummaryScreen({ summary, isSummarizing, study, respondent, messages, on
 
   const exportExcel = () => {
     const wb = XLSX.utils.book_new();
+    const hdrStyle  = { font: { bold: true, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "1A1A2E" } }, alignment: { wrapText: true } };
+    const ivStyle   = { fill: { fgColor: { rgb: "EEF2FF" } }, alignment: { wrapText: true, vertical: "top" } };
+    const respStyle = { fill: { fgColor: { rgb: "F0FDF4" } }, alignment: { wrapText: true, vertical: "top" } };
 
     /* Sheet 1: Transcript */
-    const txRows = [
-      ["Speaker", "Message"],
+    const txRows: string[][] = [
+      ["#", "Speaker", "Message"],
       ...messages
         .filter((m) => m.role !== "system")
-        .map((m) => [m.role === "assistant" ? "Mrs Dissanayake" : "Respondent", m.content]),
+        .map((m, i) => [String(i + 1), m.role === "assistant" ? "Mrs Dissanayake" : "Respondent", m.content]),
     ];
     const txSheet = XLSX.utils.aoa_to_sheet(txRows);
-    txSheet["!cols"] = [{ wch: 20 }, { wch: 80 }];
+    txSheet["!cols"] = [{ wch: 4 }, { wch: 20 }, { wch: 90 }];
+    txRows.forEach((row, ri) => {
+      ["A","B","C"].forEach(col => {
+        const ref = `${col}${ri + 1}`;
+        if (!txSheet[ref]) return;
+        if (ri === 0) txSheet[ref].s = hdrStyle;
+        else txSheet[ref].s = row[1] === "Mrs Dissanayake" ? ivStyle : respStyle;
+      });
+    });
     XLSX.utils.book_append_sheet(wb, txSheet, "Transcript");
 
     /* Sheet 2: Summary */
@@ -427,10 +438,62 @@ function SummaryScreen({ summary, isSummarizing, study, respondent, messages, on
       ];
       const rSheet = XLSX.utils.aoa_to_sheet(rRows);
       rSheet["!cols"] = [{ wch: 15 }, { wch: 30 }];
+      ["A1","B1"].forEach(ref => { if (rSheet[ref]) rSheet[ref].s = hdrStyle; });
       XLSX.utils.book_append_sheet(wb, rSheet, "Respondent");
     }
 
     XLSX.writeFile(wb, `interview-report-${Date.now()}.xlsx`);
+  };
+
+  const exportWord = async () => {
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = await import("docx");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const children: any[] = [];
+
+    // Title
+    children.push(new Paragraph({ text: "Research Report", heading: HeadingLevel.TITLE }));
+    if (study) children.push(new Paragraph({ text: `${study.productCategory} · ${studyLabel ?? ""}`, style: "Subtitle" }));
+    children.push(new Paragraph({ text: "" }));
+
+    // Respondent details
+    if (respondent && (respondent.name || respondent.age || respondent.gender || respondent.district || respondent.occupation)) {
+      children.push(new Paragraph({ text: "Respondent Profile", heading: HeadingLevel.HEADING_1 }));
+      for (const [label, val] of [
+        ["Name", respondent.name], ["Age", respondent.age], ["Gender", respondent.gender],
+        ["District", respondent.district], ["Occupation", respondent.occupation],
+      ] as [string, string | undefined][]) {
+        if (val) children.push(new Paragraph({ children: [new TextRun({ text: `${label}: `, bold: true }), new TextRun(val)] }));
+      }
+      children.push(new Paragraph({ text: "" }));
+    }
+
+    // Summary
+    if (summary) {
+      children.push(new Paragraph({ text: "Summary", heading: HeadingLevel.HEADING_1 }));
+      for (const line of summary.split("\n")) {
+        if (!line.trim()) { children.push(new Paragraph({ text: "" })); continue; }
+        if (line.startsWith("## "))  { children.push(new Paragraph({ text: line.slice(3), heading: HeadingLevel.HEADING_2 })); continue; }
+        if (line.startsWith("### ")) { children.push(new Paragraph({ text: line.slice(4), heading: HeadingLevel.HEADING_3 })); continue; }
+        const parts = line.replace(/^[-•] /, "").split(/\*\*(.*?)\*\*/g);
+        children.push(new Paragraph({ children: parts.map((p, j) => new TextRun({ text: p, bold: j % 2 === 1 })), bullet: line.startsWith("- ") || line.startsWith("• ") ? { level: 0 } : undefined }));
+      }
+      children.push(new Paragraph({ text: "" }));
+    }
+
+    // Transcript
+    children.push(new Paragraph({ text: "Interview Transcript", heading: HeadingLevel.HEADING_1 }));
+    for (const m of messages.filter(x => x.role !== "system")) {
+      const speaker = m.role === "assistant" ? "Mrs Dissanayake" : "Respondent";
+      children.push(new Paragraph({ children: [new TextRun({ text: `${speaker}: `, bold: true }), new TextRun(m.content)] }));
+      children.push(new Paragraph({ text: "" }));
+    }
+
+    const doc = new Document({ sections: [{ children }] });
+    const blob = await Packer.toBlob(doc);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `interview-report-${Date.now()}.docx`; a.click();
+    URL.revokeObjectURL(url);
   };
 
   const copySummary = async () => {
@@ -496,6 +559,9 @@ function SummaryScreen({ summary, isSummarizing, study, respondent, messages, on
             <button onClick={exportExcel} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 9, border: "1px solid var(--border2)", background: "var(--bg2)", color: "var(--txt2)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
               <Download size={13}/> Export Excel
             </button>
+            <button onClick={exportWord} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 9, border: "1px solid var(--border2)", background: "var(--bg2)", color: "var(--txt2)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
+              <FileText size={13}/> Export Word
+            </button>
           </div>
         </div>
 
@@ -555,6 +621,10 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   const [revealedWords, setRevealedWords] = useState(-1);
   const [seconds, setSeconds]         = useState(0);
   const [isMobile, setIsMobile]       = useState(false);
+  const [linkCopied, setLinkCopied]   = useState(false);
+  const [avatarHandlesTTS, setAvatarHandlesTTS] = useState(false);
+  const [pendingSpeakText, setPendingSpeakText] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(true);
 
   const bottomRef      = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -593,6 +663,32 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
     return () => clearInterval(id);
   }, [status]);
 
+  /* Prevent accidental navigation during interview */
+  useEffect(() => {
+    if (status !== "active") return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [status]);
+
+  /* Fullscreen lock */
+  useEffect(() => {
+    if (status !== "active") return;
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, [status]);
+
+  /* Auto-end when AI sends closing message and avatar finishes speaking */
+  useEffect(() => {
+    if (!showClosingBanner || isSpeaking || isLoading) return;
+    const t = setTimeout(() => endInterview(), 2500);
+    return () => clearTimeout(t);
+  }, [showClosingBanner, isSpeaking, isLoading, endInterview]);
+
   /* Auto-start when preConfig is provided (respondent session link flow) */
   useEffect(() => {
     if (!preConfig || status !== "idle" || autoStarted.current) return;
@@ -604,18 +700,21 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
       { productCategory: preConfig.productCategory, studyType: preConfig.studyType },
       respondentDetails,
       preConfig.customGuide,
-      preConfig.sessionToken
-
+      preConfig.sessionToken,
     );
   }, [preConfig, status, startInterview]);
 
   const timerStr = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 
   const speak = useCallback(async (text: string) => {
+    if (avatarHandlesTTS) {
+      /* LiveAvatar speaks — just pass the text, it fires onSpeakStart/End itself */
+      setPendingSpeakText(text);
+      return;
+    }
     stopAudioRef.current?.();
     stopAudioRef.current = null;
     setRevealedWords(0);
-    
     const cleanup = await playTTS(
       text,
       () => setIsSpeaking(true),
@@ -625,16 +724,28 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
       analyserRef,
     );
     stopAudioRef.current = cleanup;
-  }, [language]);
+  }, [language, avatarHandlesTTS]);
 
   const lastAssistantMsg = messages.filter((m) => m.role === "assistant").at(-1);
-  const spokenRef = useRef<number>(-1);
+  const spokenRef  = useRef<number>(-1);
+  const prevHandlesRef = useRef(false);
 
   useEffect(() => {
     if (!lastAssistantMsg?.content || isLoading) return;
     const idx = messages.length - 1;
     if (spokenRef.current !== idx) { spokenRef.current = idx; speak(lastAssistantMsg.content); }
   }, [lastAssistantMsg, isLoading, messages.length, speak]);
+
+  /* When avatar connects mid-interview, re-speak last message via avatar */
+  useEffect(() => {
+    if (avatarHandlesTTS && !prevHandlesRef.current && lastAssistantMsg?.content && !isSpeaking) {
+      stopAudioRef.current?.();
+      stopAudioRef.current = null;
+      setPendingSpeakText(lastAssistantMsg.content);
+    }
+    prevHandlesRef.current = avatarHandlesTTS;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [avatarHandlesTTS]);
 
   const handleSend = async () => {
     const text = input.trim();
@@ -689,6 +800,8 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   );
   if (status === "finished") return <SummaryScreen summary={summary} isSummarizing={isSummarizing} study={study} respondent={respondent} messages={messages} onReset={reset} isRespondentMode={!!preConfig} />;
 
+
+
   return (
     <div style={{
       display: isMobile ? "flex" : "grid",
@@ -696,6 +809,23 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
       gridTemplateColumns: isMobile ? undefined : "1fr 400px",
       height: "100vh", overflow: "hidden",
     }}>
+
+      {/* Fullscreen lock — blocks interview if user exits fullscreen */}
+      {!isFullscreen && status === "active" && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.97)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20 }}>
+          <div style={{ fontSize: 40 }}>🔒</div>
+          <h2 style={{ color: "#fff", fontFamily: "var(--font-serif)", fontSize: 24, fontWeight: 400, margin: 0 }}>Interview paused</h2>
+          <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 14, margin: 0, textAlign: "center", maxWidth: 320 }}>
+            You must stay in fullscreen during the interview.
+          </p>
+          <button
+            onClick={() => document.documentElement.requestFullscreen().catch(() => {})}
+            style={{ marginTop: 8, padding: "12px 28px", borderRadius: 10, border: "none", background: "var(--inv)", color: "var(--inv-txt)", fontSize: 15, fontWeight: 500, cursor: "pointer", fontFamily: "inherit" }}
+          >
+            Return to Fullscreen
+          </button>
+        </div>
+      )}
 
       {/* ── LEFT: avatar side ── */}
       <div style={{
@@ -737,8 +867,11 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
             isSpeaking={isSpeaking}
             isListening={isListening}
             language={LOCALE_BCP47[language]}
-            speakText={isSpeaking ? (messages.filter(m => m.role === "assistant").at(-1)?.content ?? null) : null}
+            speakText={pendingSpeakText}
             analyserRef={analyserRef}
+            onSpeakStart={() => setIsSpeaking(true)}
+            onSpeakEnd={() => { setIsSpeaking(false); setPendingSpeakText(null); }}
+            onAvatarReady={(handlesAudio) => setAvatarHandlesTTS(handlesAudio)}
           />
 
           {/* Bottom gradient overlay */}
@@ -776,11 +909,24 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
       {/* ── RIGHT: chat-side ── */}
       <div style={{ display: "flex", flexDirection: "column", flex: 1, height: isMobile ? "auto" : "100vh", minHeight: 0, background: "var(--bg)" }}>
         {/* Chat header */}
-        <div style={{ padding: "17px 22px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--txt)" }}>Transcript</div>
-          <div style={{ fontSize: 12, color: "var(--txt3)", marginTop: 2 }}>
-            {LOCALE_LABELS[language]} · {STUDY_OPTIONS.find((s) => s.id === study?.studyType)?.label ?? "Interview"}
+        <div style={{ padding: "17px 22px", borderBottom: "1px solid var(--border)", flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 500, color: "var(--txt)" }}>Transcript</div>
+            <div style={{ fontSize: 12, color: "var(--txt3)", marginTop: 2 }}>
+              {LOCALE_LABELS[language]} · {STUDY_OPTIONS.find((s) => s.id === study?.studyType)?.label ?? "Interview"}
+            </div>
           </div>
+          <button 
+            onClick={() => {
+              navigator.clipboard.writeText(window.location.href);
+              setLinkCopied(true);
+              setTimeout(() => setLinkCopied(false), 2000);
+            }}
+            className="vt-btn-ghost" 
+            style={{ padding: "8px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 6, color: linkCopied ? "#16a34a" : "inherit" }}
+          >
+            {linkCopied ? <><Check size={13} /> Copied!</> : <><Copy size={13} /> Copy Link</>}
+          </button>
         </div>
 
         {/* Closing banner */}
