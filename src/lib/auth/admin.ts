@@ -1,27 +1,21 @@
-import { createClient } from "@supabase/supabase-js";
 import type { NextRequest } from "next/server";
 
+const COOKIE = "admin_session";
+
+function safeEq(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 /**
- * Verifies that the request carries a valid Supabase JWT belonging to the
- * configured admin email. Returns the verified user email or null.
+ * Verifies an admin API request by checking the httpOnly admin_session cookie.
+ * Returns true only if the cookie matches ADMIN_SECRET_TOKEN.
  */
-export async function verifyAdmin(req: NextRequest): Promise<string | null> {
-  const authHeader = req.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) return null;
-
-  const token      = authHeader.slice(7);
-  const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL;
-  const url        = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!adminEmail || !url || !serviceKey) return null;
-
-  try {
-    const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
-    const { data: { user }, error } = await admin.auth.getUser(token);
-    if (error || !user || user.email !== adminEmail) return null;
-    return user.email;
-  } catch {
-    return null;
-  }
+export async function verifyAdmin(req: NextRequest): Promise<boolean> {
+  const secret = process.env.ADMIN_SECRET_TOKEN;
+  if (!secret) return false;
+  const session = req.cookies.get(COOKIE)?.value ?? "";
+  return safeEq(session, secret);
 }

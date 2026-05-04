@@ -3,6 +3,8 @@ import { getDbClient } from "@/lib/db/client";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAdmin } from "@/lib/auth/admin";
 
+export const runtime = "nodejs";
+
 function last14Days(): string[] {
   return Array.from({ length: 14 }, (_, i) => {
     const d = new Date();

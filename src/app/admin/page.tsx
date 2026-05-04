@@ -3,17 +3,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/components/auth/AuthProvider";
-import { getBrowserClient } from "@/lib/auth/client";
-
-async function adminHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
-  const { data: { session } } = await getBrowserClient().auth.getSession();
-  return {
-    "Authorization": `Bearer ${session?.access_token ?? ""}`,
-    "Content-Type": "application/json",
-    ...extra,
-  };
-}
 
 interface AdminSession {
   id: string;
@@ -63,42 +52,31 @@ function StatusBadge({ status }: { status: "active" | "closed" }) {
 }
 
 export default function AdminPage() {
-  const { user, loading } = useAuth();
   const router = useRouter();
-  const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL;
 
-  const [sessions, setSessions]     = useState<AdminSession[]>([]);
-  const [fetching, setFetching]     = useState(true);
-  const [actionId, setActionId]     = useState<string | null>(null);
-  const [filterStatus, setFilter]   = useState<"all" | "active" | "closed">("all");
-
-  const isAdmin = !!user && user.email === adminEmail;
+  const [sessions, setSessions]   = useState<AdminSession[]>([]);
+  const [fetching, setFetching]   = useState(true);
+  const [actionId, setActionId]   = useState<string | null>(null);
+  const [filterStatus, setFilter] = useState<"all" | "active" | "closed">("all");
 
   const fetchSessions = useCallback(async () => {
     setFetching(true);
-    const res = await fetch("/api/admin/sessions", { headers: await adminHeaders() });
+    const res = await fetch("/api/admin/sessions");
+    if (res.status === 403) { router.replace("/admin/login"); return; }
     if (res.ok) setSessions(await res.json());
     setFetching(false);
-  }, []);
+  }, [router]);
 
   const fetchRef = useRef(fetchSessions);
   useEffect(() => { fetchRef.current = fetchSessions; }, [fetchSessions]);
 
-  useEffect(() => {
-    if (loading) return;
-    if (!user)    { router.replace("/login");     return; }
-    if (!isAdmin) { router.replace("/dashboard"); return; }
-  }, [user, loading, isAdmin, router]);
-
-  useEffect(() => {
-    if (user && isAdmin) void fetchRef.current();
-  }, [user, isAdmin]);
+  useEffect(() => { void fetchRef.current(); }, []);
 
   async function patchStatus(id: string, status: "active" | "closed") {
     setActionId(id);
     await fetch("/api/admin/sessions", {
       method: "PATCH",
-      headers: await adminHeaders(),
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, status }),
     });
     await fetchRef.current();
@@ -110,18 +88,21 @@ export default function AdminPage() {
     setActionId(id);
     await fetch("/api/admin/sessions", {
       method: "DELETE",
-      headers: await adminHeaders(),
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
     });
     setSessions(s => s.filter(x => x.id !== id));
     setActionId(null);
   }
 
+  async function logout() {
+    await fetch("/api/admin/auth", { method: "DELETE" });
+    router.replace("/admin/login");
+  }
+
   const visible = sessions.filter(s => filterStatus === "all" || s.status === filterStatus);
   const totalActive = sessions.filter(s => s.status === "active").length;
   const totalClosed = sessions.filter(s => s.status === "closed").length;
-
-  if (loading || !user) return null;
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
@@ -135,19 +116,20 @@ export default function AdminPage() {
           <span style={{ fontSize: 12.5, color: "var(--txt2)", padding: "3px 10px", borderRadius: 99, background: "rgba(0,0,0,0.05)", border: "1px solid var(--border)" }}>
             Admin
           </span>
-          <span style={{ fontSize: 13, color: "var(--txt2)" }}>{user.email}</span>
           <Link href="/admin/analytics" style={{ fontSize: 13, color: "var(--txt2)", textDecoration: "none", padding: "6px 14px", borderRadius: 8, border: "1px solid var(--border)", fontWeight: 500 }}>
             Analytics
           </Link>
-          <Link href="/dashboard" style={{ fontSize: 13, color: "var(--txt2)", textDecoration: "none", padding: "6px 14px", borderRadius: 8, border: "1px solid var(--border)", fontWeight: 500 }}>
-            Dashboard
-          </Link>
+          <button
+            onClick={logout}
+            style={{ fontSize: 13, color: "var(--txt2)", padding: "6px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontWeight: 500 }}
+          >
+            Logout
+          </button>
         </div>
       </header>
 
       <main style={{ maxWidth: 1100, margin: "0 auto", padding: "48px 24px" }}>
 
-        {/* Page heading */}
         <div style={{ marginBottom: 40 }}>
           <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 34, fontWeight: 400, letterSpacing: "-0.02em", color: "var(--txt)", marginBottom: 6 }}>
             Admin Console
@@ -160,9 +142,9 @@ export default function AdminPage() {
         {/* Stats row */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 36 }}>
           {[
-            { label: "Total Sessions",  value: sessions.length },
-            { label: "Active",          value: totalActive },
-            { label: "Closed",          value: totalClosed },
+            { label: "Total Sessions", value: sessions.length },
+            { label: "Active",         value: totalActive },
+            { label: "Closed",         value: totalClosed },
           ].map(({ label, value }) => (
             <div key={label} style={{ padding: "20px 24px", border: "1px solid var(--border)", borderRadius: 14, background: "var(--bg2)" }}>
               <div style={{ fontSize: 28, fontWeight: 600, color: "var(--txt)", letterSpacing: "-0.02em", marginBottom: 4 }}>{value}</div>

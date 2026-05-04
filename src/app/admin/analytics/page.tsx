@@ -3,13 +3,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/components/auth/AuthProvider";
-import { getBrowserClient } from "@/lib/auth/client";
-
-async function adminHeaders(): Promise<Record<string, string>> {
-  const { data: { session } } = await getBrowserClient().auth.getSession();
-  return { "Authorization": `Bearer ${session?.access_token ?? ""}` };
-}
 import {
   Users, BarChart2, MessageSquare, TrendingUp,
   Activity, Globe, RefreshCw, ChevronRight,
@@ -152,10 +145,7 @@ function SectionTitle({ title, sub }: { title: string; sub?: string }) {
 /* ── page ── */
 
 export default function AnalyticsPage() {
-  const { user, loading } = useAuth();
   const router = useRouter();
-  const adminEmail = process.env.NEXT_PUBLIC_ADMIN_EMAIL;
-  const isAdmin = !!user && user.email === adminEmail;
 
   const [data,       setData]       = useState<AnalyticsData | null>(null);
   const [fetching,   setFetching]   = useState(true);
@@ -166,7 +156,8 @@ export default function AnalyticsPage() {
     isRefresh ? setRefreshing(true) : setFetching(true);
     setError("");
     try {
-      const res = await fetch("/api/admin/analytics", { headers: await adminHeaders() });
+      const res = await fetch("/api/admin/analytics");
+      if (res.status === 403) { router.replace("/admin/login"); return; }
       if (!res.ok) { setError("Failed to load analytics — check API."); return; }
       setData(await res.json());
     } catch {
@@ -174,24 +165,12 @@ export default function AnalyticsPage() {
     } finally {
       setFetching(false); setRefreshing(false);
     }
-  }, []);
+  }, [router]);
 
   const fetchRef = useRef(fetchData);
   useEffect(() => { fetchRef.current = fetchData; }, [fetchData]);
 
-  // auth guard — redirects only, no state changes
-  useEffect(() => {
-    if (loading) return;
-    if (!user)    { router.replace("/login");     return; }
-    if (!isAdmin) { router.replace("/dashboard"); return; }
-  }, [user, loading, isAdmin, router]);
-
-  // data fetch via stable ref — React Compiler safe
-  useEffect(() => {
-    if (user && isAdmin) void fetchRef.current();
-  }, [user, isAdmin]);
-
-  if (loading || !user) return null;
+  useEffect(() => { void fetchRef.current(); }, []);
 
   const d = data;
 
@@ -210,9 +189,6 @@ export default function AnalyticsPage() {
           <Link href="/admin" className="an-nav-link">
             Console <ChevronRight size={12} />
           </Link>
-          <Link href="/dashboard" className="an-nav-link">
-            Dashboard
-          </Link>
           <button
             onClick={() => fetchData(true)}
             disabled={refreshing}
@@ -221,6 +197,12 @@ export default function AnalyticsPage() {
           >
             <RefreshCw size={13} className={refreshing ? "an-spin" : ""} />
             <span className="an-refresh-label">{refreshing ? "Refreshing…" : "Refresh"}</span>
+          </button>
+          <button
+            onClick={async () => { await fetch("/api/admin/auth", { method: "DELETE" }); router.replace("/admin/login"); }}
+            className="an-nav-btn"
+          >
+            Logout
           </button>
         </nav>
       </header>
