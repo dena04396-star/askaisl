@@ -65,7 +65,7 @@ export default function InterviewTypesSection() {
         Mrs Dissanayake adapts her interview approach entirely based on your research objective.
       </p>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginTop: 52 }}>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-10 px-6 max-w-7xl mx-auto md:mt-12">
         {TYPES.map(({ name, label, icon }) => (
           <Link
             key={name}

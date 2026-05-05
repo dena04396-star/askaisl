@@ -7,13 +7,12 @@ import { Menu, X } from "lucide-react";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { getBrowserClient } from "@/lib/auth/client";
 
+import Image from "next/image";
+
 function LogoMark() {
   return (
-    <div className="w-5.5 h-5.5 rounded-md flex items-center justify-center shrink-0"
-      style={{ background: "var(--inv)" }}>
-      <svg viewBox="0 0 12 12" fill="none" width={12} height={12}>
-        <path d="M2 10L6 2l4 8" stroke="var(--inv-txt)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
+    <div className="w-5.5 h-5.5 rounded-md flex items-center justify-center shrink-0">
+      <Image src="/logo.png" alt="askaisl logo" width={22} height={22} className="object-contain" />
     </div>
   );
 }
@@ -45,7 +44,7 @@ export default function Navbar() {
           style={{ fontFamily: "var(--font-serif)", color: "var(--txt)" }}
           onClick={() => setMenuOpen(false)}
         >
-          <LogoMark /> vinterview
+          <LogoMark /> askaisl
         </Link>
 
         {/* Desktop nav links */}

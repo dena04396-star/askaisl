@@ -1,4 +1,4 @@
--- Vinterview – Supabase schema
+-- Askaisl – Supabase schema
 -- Run this in the Supabase SQL editor: https://supabase.com/dashboard/project/_/sql
 
 -- ──────────────────────────────────────────────────────────────────

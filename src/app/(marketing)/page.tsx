@@ -10,7 +10,7 @@ import FAQSection          from "@/components/marketing/FAQSection";
 import CTABanner           from "@/components/marketing/CTABanner";
 
 export const metadata = {
-  title: "Vinterview — AI Consumer Research Interviews",
+  title: "Askaisl — AI Consumer Research Interviews",
   description: "AI-powered consumer research interviews for FMCG brands in Sri Lanka. Adaptive, trilingual, available 24/7.",
 };
 

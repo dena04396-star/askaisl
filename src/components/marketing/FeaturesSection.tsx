@@ -24,7 +24,7 @@ export default function FeaturesSection() {
         Everything you need for<br /><em style={{ fontStyle: "italic" }}>real consumer research</em>
       </h2>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1, background: "var(--border)", border: "1px solid var(--border)", borderRadius: 16, overflow: "hidden", marginTop: 60 }}>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-px mt-10 md:mt-16 bg-[var(--border)] border border-[var(--border)] overflow-hidden rounded-2xl">
         {FEATURES.map(({ num, title, desc }) => (
           <div key={num} className="vt-feat-card" style={{ background: "var(--bg)", padding: "40px 36px", display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ fontSize: 12, color: "var(--txt3)", fontWeight: 600, letterSpacing: "0.08em" }}>{num}</div>

@@ -13,7 +13,7 @@ export default function HowItWorksSection() {
         Four steps to your<br />first research report
       </h2>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 40, marginTop: 60 }}>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 md:gap-10 mt-10 md:mt-16 px-6 max-w-7xl mx-auto">
         {STEPS.map(({ n, title, desc }) => (
           <div key={n}>
             <div style={{ width: 36, height: 36, borderRadius: 9, background: "var(--inv)", color: "var(--inv-txt)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 600, marginBottom: 20 }}>{n}</div>

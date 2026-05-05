@@ -4,7 +4,7 @@ function HeroVisual() {
   const wvHeights = [5, 10, 14, 10, 5, 9];
   return (
     <div style={{ borderRadius: 20, overflow: "hidden", aspectRatio: "4/3", background: "var(--bg2)", border: "1px solid var(--border)", boxShadow: "var(--shadow-lg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ width: "100%", height: "100%", display: "grid", gridTemplateColumns: "1fr 1fr", overflow: "hidden", borderRadius: "inherit" }}>
+      <div className="w-full h-full flex flex-col md:grid md:grid-cols-2 overflow-hidden rounded-[inherit]">
 
         {/* Left: avatar panel */}
         <div style={{ background: "var(--bg2)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", position: "relative", overflow: "hidden" }}>
@@ -102,7 +102,7 @@ const AVATARS = ["R", "A", "P", "J"];
 
 export default function HeroSection() {
   return (
-    <section style={{ maxWidth: 1200, margin: "0 auto", padding: "100px 52px 80px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 80, alignItems: "center" }}>
+    <section className="max-w-7xl mx-auto px-6 py-12 md:py-24 flex flex-col md:grid md:grid-cols-2 gap-10 md:gap-20 items-center">
       <div>
         <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "5px 14px", borderRadius: 99, border: "1px solid var(--border2)", fontSize: 12.5, color: "var(--txt2)", marginBottom: 28 }}>
           <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#16a34a", animation: "blink 2s ease-in-out infinite" }} />
@@ -117,7 +117,7 @@ export default function HeroSection() {
           Meet Mrs Dissanayake — your AI market research interviewer. Adaptive, trilingual, and available 24/7. Real questions, real insights, real research.
         </p>
 
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 40 }}>
+        <div className="flex flex-wrap gap-3 mb-8 md:mb-10">
           <Link href="/chat" className="vt-btn-solid vt-btn-lg">
             Start Interview
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 7h8M7 3l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>

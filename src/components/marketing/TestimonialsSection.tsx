@@ -37,7 +37,7 @@ export default function TestimonialsSection() {
         Research teams who<br /><em style={{ fontStyle: "italic" }}>found real insights</em>
       </h2>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20, marginTop: 56 }}>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mt-10 px-6 max-w-7xl mx-auto md:mt-14">
         {TESTIMONIALS.map(({ q, name, role, initials }) => (
           <div key={name} className="vt-testi-card" style={{ border: "1px solid var(--border)", borderRadius: 16, padding: 32, background: "var(--bg)", display: "flex", flexDirection: "column", gap: 20 }}>
             <StarRow />

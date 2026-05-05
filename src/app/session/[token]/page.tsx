@@ -72,7 +72,7 @@ export default function SessionPage() {
       {/* Logo — not a link during consent so respondent can't navigate away */}
       <div className="flex items-center gap-2 font-medium text-xl mb-12"
         style={{ fontFamily: "var(--font-serif)", color: "var(--txt)" }}>
-        <LogoMark /> vinterview
+        <LogoMark /> askaisl
       </div>
 
       {/* Loading */}

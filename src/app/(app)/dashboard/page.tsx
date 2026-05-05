@@ -397,7 +397,7 @@ export default function DashboardPage() {
         XLSX.utils.book_append_sheet(newWb, wb.Sheets[name], name);
       });
 
-      xlsxDownload(newWb, `vinterview-all-sessions-${new Date().toISOString().slice(0,10)}.xlsx`);
+      xlsxDownload(newWb, `askaisl-all-sessions-${new Date().toISOString().slice(0,10)}.xlsx`);
     } finally {
       setBulkDownloading(false);
     }
@@ -415,7 +415,7 @@ export default function DashboardPage() {
 
       /* Cover page */
       children.push(new Paragraph({
-        children: [new TextRun({ text: "Vinterview", bold: true, size: 72, color: "0F0F1A", font: "Calibri Light" })],
+        children: [new TextRun({ text: "Askaisl", bold: true, size: 72, color: "0F0F1A", font: "Calibri Light" })],
         spacing: { before: 2000, after: 200 },
         alignment: AlignmentType.CENTER,
       }));
@@ -495,7 +495,7 @@ export default function DashboardPage() {
       const blob = await Packer.toBlob(doc);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `vinterview-all-sessions-${new Date().toISOString().slice(0,10)}.docx`; a.click();
+      a.href = url; a.download = `askaisl-all-sessions-${new Date().toISOString().slice(0,10)}.docx`; a.click();
       URL.revokeObjectURL(url);
     } finally {
       setBulkDownloading(false);
@@ -512,7 +512,7 @@ export default function DashboardPage() {
         <div className="flex items-center justify-between px-4 md:px-10 h-15.5 max-w-300 mx-auto">
           <Link href="/" className="flex items-center gap-2 no-underline"
             style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 500, color: "var(--txt)" }}>
-            <LogoMark /> vinterview
+            <LogoMark /> askaisl
           </Link>
           <div className="flex items-center gap-6">
             <nav className="flex gap-4">
@@ -747,7 +747,7 @@ export default function DashboardPage() {
 
             {/* Summary stats */}
             {sessionsWithData.length > 0 && (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 16, marginBottom: 32 }}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-4 mb-8">
                 {[
                   { label: "Sessions",    value: String(sessions.length) },
                   { label: "Responses",   value: String(transcripts.length) },

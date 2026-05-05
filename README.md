@@ -1,4 +1,4 @@
-# Vinterview – AI-Powered Mock Interviewer
+# Askaisl – AI-Powered Mock Interviewer
 
 A production-ready AI interview practice app built with Next.js 16, featuring:
 
@@ -17,7 +17,7 @@ A production-ready AI interview practice app built with Next.js 16, featuring:
 
 ```bash
 git clone <repo-url>
-cd vinterview
+cd askaisl
 npm install
 ```
 

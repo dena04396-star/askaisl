@@ -62,7 +62,7 @@ export default function LoginPage() {
       <div style={{ width: "100%", maxWidth: 400 }}>
 
         <Link href="/" style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 500, color: "var(--txt)", textDecoration: "none", display: "flex", alignItems: "center", gap: 8, marginBottom: 40, justifyContent: "center" }}>
-          <LogoMark /> vinterview
+          <LogoMark /> askaisl
         </Link>
 
         <div style={{ padding: "40px", border: "1px solid var(--border)", borderRadius: 18, background: "var(--bg)", boxShadow: "var(--shadow-lg)" }}>

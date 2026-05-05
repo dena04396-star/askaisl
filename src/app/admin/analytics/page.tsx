@@ -181,7 +181,7 @@ export default function AnalyticsPage() {
       <header className="an-header">
         <Link href="/" className="an-logo">
           <LogoMark />
-          <span>vinterview</span>
+          <span>askaisl</span>
         </Link>
 
         <nav className="an-nav">

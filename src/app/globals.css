@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* ── Tokens (matches vinterview.html exactly) ── */
+/* ── Tokens (matches askaisl.html exactly) ── */
 :root {
   --bg:      #ffffff;
   --bg2:     #f7f7f7;
@@ -59,7 +59,7 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border2); }
 
-/* ── Animations (from vinterview.html) ── */
+/* ── Animations (from askaisl.html) ── */
 @keyframes blink    { 0%,100%{opacity:1} 50%{opacity:0.2} }
 @keyframes breathe  { 0%,100%{transform:scale(1);opacity:0.5} 50%{transform:scale(1.02);opacity:1} }
 @keyframes speak-ring { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
@@ -102,7 +102,7 @@ mark.karaoke {
   font-style: normal;
 }
 
-/* ── Vinterview button utilities ── */
+/* ── Askaisl button utilities ── */
 .vt-btn-ghost {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 9px 20px; border-radius: 9px; font-size: 14px; font-weight: 500;

@@ -21,7 +21,7 @@ const cormorant = Cormorant_Garamond({
 });
 
 export const metadata: Metadata = {
-  title: "vinterview — AI Consumer Research",
+  title: "askaisl — AI Consumer Research",
   description: "AI-powered consumer research interviews with Mrs Dissanayake",
 };
 

@@ -252,7 +252,7 @@ function SetupScreen({ onStart }: {
                   <path d="M2 10L6 2l4 8" stroke="var(--inv)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </div>
-              vinterview
+              askaisl
             </div>
 
             <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 40, fontWeight: 400, letterSpacing: "-0.025em", lineHeight: 1.06, marginBottom: 18 }}>
@@ -533,14 +533,14 @@ function SummaryScreen({ summary, isSummarizing, study, respondent, messages, on
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg)", display: "grid", gridTemplateColumns: "220px 1fr" }} className="summary-grid">
+    <div className="min-h-screen bg-[var(--bg)] flex flex-col md:grid md:grid-cols-[220px_1fr] summary-grid">
       {/* Sidebar */}
       <div style={{ background: "var(--bg2)", borderRight: "1px solid var(--border)", padding: "28px 20px", display: "flex", flexDirection: "column", gap: 4, position: "sticky", top: 0, height: "100vh", overflowY: "auto" }} className="summary-sidebar">
         <div style={{ fontFamily: "var(--font-serif)", fontSize: 18, padding: "0 8px", marginBottom: 28, display: "flex", alignItems: "center", gap: 7 }}>
           <div style={{ width: 20, height: 20, borderRadius: 5, background: "var(--inv)", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <svg viewBox="0 0 12 12" fill="none" width={10} height={10}><path d="M2 10L6 2l4 8" stroke="var(--inv-txt)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </div>
-          vinterview
+          askaisl
         </div>
         <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--txt3)", padding: "16px 10px 8px" }}>Session</div>
         <button style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, fontSize: 13.5, cursor: "pointer", transition: "all 0.15s", border: "none", background: "var(--inv)", color: "var(--inv-txt)", fontFamily: "inherit", width: "100%", textAlign: "left" }}>

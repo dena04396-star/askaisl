@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import ChatInterface from "@/components/chat/ChatInterface";
 
 export const metadata: Metadata = {
-  title: "Interview – Vinterview",
+  title: "Interview – Askaisl",
 };
 
 export default function ChatPage() {

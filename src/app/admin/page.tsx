@@ -110,7 +110,7 @@ export default function AdminPage() {
       {/* Top bar */}
       <header style={{ position: "sticky", top: 0, zIndex: 100, background: "var(--bg)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 48px", height: 62 }}>
         <Link href="/" style={{ fontFamily: "var(--font-serif)", fontSize: 21, fontWeight: 500, letterSpacing: "-0.01em", color: "var(--txt)", textDecoration: "none", display: "flex", alignItems: "center", gap: 7 }}>
-          <LogoMark /> vinterview
+          <LogoMark /> askaisl
         </Link>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 12.5, color: "var(--txt2)", padding: "3px 10px", borderRadius: 99, background: "rgba(0,0,0,0.05)", border: "1px solid var(--border)" }}>

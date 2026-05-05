@@ -1,7 +1,7 @@
 const FAQS = [
   {
     q: "Do respondents need to download anything?",
-    a: "No. Vinterview runs entirely in the browser. Respondents just visit the link — no app, no signup, no friction.",
+    a: "No. Askaisl runs entirely in the browser. Respondents just visit the link — no app, no signup, no friction.",
   },
   {
     q: "Which languages are supported?",

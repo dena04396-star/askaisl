@@ -42,8 +42,8 @@ function AvatarInner({ isSpeaking, isListening, analyserRef, onReadyInner }: Inn
   const jawRef    = useRef<THREE.Object3D | null>(null);
 
   /* base arm angles — RPM/Mixamo rig: z brings arm down from T-pose */
-  const lBase = useRef({ z: 1.85, x: 0.0, y: 0.0 });
-  const rBase = useRef({ z: -1.85, x: 0.0, y: 0.0 });
+  const lBase = useRef({ z: 1.50, x: 0.10, y: -0.18 });
+  const rBase = useRef({ z: -1.50, x: 0.10, y:  0.18 });
 
   /* time / blink */
   const t        = useRef(0);
@@ -87,10 +87,10 @@ function AvatarInner({ isSpeaking, isListening, analyserRef, onReadyInner }: Inn
     const rb = rBase.current;
 
     const la = scene.getObjectByName("LeftArm");
-    if (la) { la.rotation.set(0, 0, lb.z); lArmRef.current = la; }
+    if (la) { la.rotation.set(lb.x, lb.y, lb.z); lArmRef.current = la; }
 
     const ra = scene.getObjectByName("RightArm");
-    if (ra) { ra.rotation.set(0, 0, rb.z); rArmRef.current = ra; }
+    if (ra) { ra.rotation.set(rb.x, rb.y, rb.z); rArmRef.current = ra; }
 
     const lf = scene.getObjectByName("LeftForeArm");
     if (lf) { lf.rotation.set(0.05, -1.1, 0.0); lForeRef.current = lf; }
