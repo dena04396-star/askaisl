@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useRef, useEffect, useCallback, MutableRefObject } from "react";
+import { Suspense, useRef, useEffect, MutableRefObject } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
@@ -9,113 +9,110 @@ export interface Avatar3DProps {
   isSpeaking:   boolean;
   isListening?: boolean;
   analyserRef?: MutableRefObject<AnalyserNode | null>;
+  onReady?:     () => void;
 }
 
 const AVATAR_URL = "/avatar/female.glb";
-
-/* ── Audio analysis → viseme weights ─────────────────────────────────────── */
-function audioToVisemes(analyser: AnalyserNode): Record<string, number> {
-  const buf = new Uint8Array(analyser.frequencyBinCount);
-  analyser.getByteFrequencyData(buf);
-  const n = buf.length;
-
-  /* overall amplitude */
-  let sum = 0;
-  for (let i = 0; i < n; i++) sum += buf[i];
-  const amp = sum / n / 255;
-  if (amp < 0.008) return {};
-
-  /* frequency centroid — vowel colour */
-  let wS = 0, wT = 0;
-  for (let i = 0; i < n; i++) { wS += i * buf[i]; wT += buf[i]; }
-  const cent = wT > 0 ? wS / wT / n : 0.5;
-
-  /* high-frequency energy — fricatives / sibilants */
-  let hS = 0;
-  const hStart = Math.floor(n * 0.55);
-  for (let i = hStart; i < n; i++) hS += buf[i];
-  const hE = hS / (n - hStart) / 255;
-
-  const sc = Math.min(amp * 3.8, 1.0);
-
-  /* select dominant vowel */
-  let aa = 0, E = 0, I = 0, O = 0, U = 0;
-  if      (cent < 0.17) { U = 1.0; O = 0.35; }
-  else if (cent < 0.31) { O = 1.0; aa = 0.30; U = 0.15; }
-  else if (cent < 0.47) { aa = 1.0; O = 0.28; E = 0.18; }
-  else if (cent < 0.63) { E = 1.0; aa = 0.38; I = 0.18; }
-  else                  { I = 1.0; E = 0.40; }
-
-  return {
-    viseme_aa: aa * sc,
-    viseme_E:  E  * sc,
-    viseme_I:  I  * sc,
-    viseme_O:  O  * sc,
-    viseme_U:  U  * sc,
-    viseme_SS: hE * 0.75 * sc,
-    viseme_FF: hE * 0.40 * sc,
-    viseme_TH: hE * 0.20 * sc,
-    viseme_kk: (1 - hE) * amp * 0.30,
-    viseme_DD: amp * 0.22,
-    viseme_PP: amp < 0.05 ? amp * 2 : 0,   /* bilabial burst on quiet onset */
-  };
-}
-
-/* ── lerp helper ─────────────────────────────────────────────────────────── */
 const L = THREE.MathUtils.lerp;
 
-/* ── Avatar inner (runs inside Canvas) ──────────────────────────────────── */
-interface InnerProps extends Avatar3DProps { onReady: () => void; }
+/* ── FFT amplitude (0-1) ──────────────────────────────────────────────────── */
+function fftAmp(analyser: AnalyserNode): number {
+  const buf = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(buf);
+  let s = 0;
+  for (let i = 0; i < buf.length; i++) s += buf[i];
+  return s / buf.length / 255;
+}
 
-function AvatarInner({ isSpeaking, isListening, analyserRef, onReady }: InnerProps) {
+/* ── Inner component (inside Canvas) ─────────────────────────────────────── */
+interface InnerProps extends Avatar3DProps { onReadyInner: () => void; }
+
+function AvatarInner({ isSpeaking, isListening, analyserRef, onReadyInner }: InnerProps) {
   const { scene } = useGLTF(AVATAR_URL);
 
-  /* refs to meshes we animate */
-  const headRef   = useRef<THREE.SkinnedMesh | null>(null);
-  const teethRef  = useRef<THREE.SkinnedMesh | null>(null);
+  /* morph-target mesh — auto-discovered (supports Wolf3D_ AND avaturn_ avatars) */
+  const morphMeshes = useRef<THREE.SkinnedMesh[]>([]);
+
+  /* bones — confirmed names from GLB: LeftArm, RightArm, LeftForeArm, RightForeArm */
   const headBone  = useRef<THREE.Object3D | null>(null);
+  const lArmRef   = useRef<THREE.Object3D | null>(null);
+  const rArmRef   = useRef<THREE.Object3D | null>(null);
+  const lForeRef  = useRef<THREE.Object3D | null>(null);
+  const rForeRef  = useRef<THREE.Object3D | null>(null);
+  const jawRef    = useRef<THREE.Object3D | null>(null);
 
-  const t       = useRef(0);
-  const blinkT  = useRef(2.5);
-  const blink   = useRef(0);
-  const blinkDir= useRef(1);
-  const blinking= useRef(false);
-  const eyeX    = useRef(0);
-  const eyeY    = useRef(0);
-  const eyeWait = useRef(3.5);
+  /* base arm angles — RPM/Mixamo rig: z brings arm down from T-pose */
+  const lBase = useRef({ z: 1.85, x: 0.0, y: 0.0 });
+  const rBase = useRef({ z: -1.85, x: 0.0, y: 0.0 });
 
-  /* discover meshes once */
-  const onReadyCb = useCallback(onReady, []); // eslint-disable-line
+  /* time / blink */
+  const t        = useRef(0);
+  const blinkT   = useRef(2.5);
+  const blink    = useRef(0);
+  const blinkDir = useRef(1);
+  const blinking = useRef(false);
+  const eyeX     = useRef(0);
+  const eyeY     = useRef(0);
+  const eyeWait  = useRef(3.5);
+
   useEffect(() => {
-    /* seed random timers here — safe, runs after mount */
-    t.current      = Math.random() * 100;
-    blinkT.current = 2 + Math.random() * 3;
-    eyeWait.current= 3 + Math.random() * 3;
+    t.current       = Math.random() * 100;
+    blinkT.current  = 2 + Math.random() * 3;
+    eyeWait.current = 3 + Math.random() * 3;
+
+    const found: THREE.SkinnedMesh[] = [];
 
     scene.traverse(child => {
-      const m = child as THREE.SkinnedMesh;
-      if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; }
-      if (child.name === "Wolf3D_Head")  headRef.current  = m;
-      if (child.name === "Wolf3D_Teeth") teethRef.current = m;
+      /* shadow */
+      if ((child as THREE.Mesh).isMesh) {
+        (child as THREE.Mesh).castShadow = true;
+        (child as THREE.Mesh).receiveShadow = true;
+      }
+      /* collect every skinned mesh that HAS morph targets */
+      const sm = child as THREE.SkinnedMesh;
+      if (sm.isSkinnedMesh && sm.morphTargetDictionary && Object.keys(sm.morphTargetDictionary).length > 0) {
+        found.push(sm);
+      }
+      /* jaw bone (some RPM exports have it) */
+      if (child.name.toLowerCase() === "jaw") jawRef.current = child;
     });
+
+    morphMeshes.current = found;
+
+    /* Head bone for sway */
     headBone.current = scene.getObjectByName("Head") ?? null;
 
-    /* log available morph targets once (dev aid) */
-    if (headRef.current?.morphTargetDictionary) {
-      console.debug("[Avatar3D] morph targets:", Object.keys(headRef.current.morphTargetDictionary));
-    }
-    onReadyCb();
-  }, [scene, onReadyCb]);
+    /* Arm bones — exact names from this GLB */
+    const lb = lBase.current;
+    const rb = rBase.current;
 
-  /* ── animation loop ─────────────────────────────────────────────────── */
+    const la = scene.getObjectByName("LeftArm");
+    if (la) { la.rotation.set(0, 0, lb.z); lArmRef.current = la; }
+
+    const ra = scene.getObjectByName("RightArm");
+    if (ra) { ra.rotation.set(0, 0, rb.z); rArmRef.current = ra; }
+
+    const lf = scene.getObjectByName("LeftForeArm");
+    if (lf) { lf.rotation.set(0.05, -1.1, 0.0); lForeRef.current = lf; }
+
+    const rf = scene.getObjectByName("RightForeArm");
+    if (rf) { rf.rotation.set(0.05, 1.1, 0.0); rForeRef.current = rf; }
+
+    if (process.env.NODE_ENV === "development") {
+      console.debug("[Avatar3D] morph meshes:", found.map(m => m.name + " (" + Object.keys(m.morphTargetDictionary!).length + " targets)"));
+    }
+
+    onReadyInner();
+  }, [scene, onReadyInner]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useFrame((_, dt) => {
     t.current += dt;
+    const tc = t.current;
 
-    /* blink timer */
+    /* blink */
     blinkT.current -= dt;
     if (!blinking.current && blinkT.current <= 0) {
-      blinking.current = true;
-      blinkDir.current = 1;
+      blinking.current = true; blinkDir.current = 1;
       blinkT.current = 3.5 + Math.random() * 4;
     }
     if (blinking.current) {
@@ -124,52 +121,92 @@ function AvatarInner({ isSpeaking, isListening, analyserRef, onReady }: InnerPro
       if (blink.current <= 0) { blink.current = 0; blinking.current = false; }
     }
 
-    /* subtle eye wander */
+    /* eye wander */
     eyeWait.current -= dt;
     if (eyeWait.current <= 0) {
-      eyeX.current  = (Math.random() - 0.5) * 0.04;
-      eyeY.current  = (Math.random() - 0.5) * 0.02;
+      eyeX.current    = (Math.random() - 0.5) * 0.04;
+      eyeY.current    = (Math.random() - 0.5) * 0.02;
       eyeWait.current = 2 + Math.random() * 5;
     }
 
-    /* subtle head movement */
+    /* head idle sway */
     if (headBone.current) {
       const spd = isSpeaking ? 1.4 : 0.5;
-      headBone.current.rotation.y = L(headBone.current.rotation.y, Math.sin(t.current * spd * 0.4) * 0.06 + eyeX.current, 0.05);
-      headBone.current.rotation.x = L(headBone.current.rotation.x, Math.sin(t.current * spd * 0.3) * 0.03 + eyeY.current, 0.05);
-      headBone.current.rotation.z = L(headBone.current.rotation.z, Math.sin(t.current * spd * 0.25) * 0.015, 0.05);
+      headBone.current.rotation.y = L(headBone.current.rotation.y, Math.sin(tc * spd * 0.4) * 0.06 + eyeX.current, 0.05);
+      headBone.current.rotation.x = L(headBone.current.rotation.x, Math.sin(tc * spd * 0.3) * 0.03 + eyeY.current, 0.05);
+      headBone.current.rotation.z = L(headBone.current.rotation.z, Math.sin(tc * spd * 0.25) * 0.015, 0.05);
     }
 
-    /* audio → viseme targets */
-    const targets: Record<string, number> =
-      isSpeaking && analyserRef?.current
-        ? audioToVisemes(analyserRef.current)
-        : {};
+    /* arms static at sides */
+    if (lArmRef.current) {
+      const lb = lBase.current;
+      lArmRef.current.rotation.z = L(lArmRef.current.rotation.z, lb.z, 0.04);
+      lArmRef.current.rotation.y = L(lArmRef.current.rotation.y, lb.y, 0.04);
+    }
+    if (rArmRef.current) {
+      const rb = rBase.current;
+      rArmRef.current.rotation.z = L(rArmRef.current.rotation.z, rb.z, 0.04);
+      rArmRef.current.rotation.y = L(rArmRef.current.rotation.y, rb.y, 0.04);
+    }
 
-    /* apply morph targets to head + teeth */
-    for (const mesh of [headRef.current, teethRef.current]) {
-      if (!mesh?.morphTargetDictionary || !mesh.morphTargetInfluences) continue;
-      const dict = mesh.morphTargetDictionary;
-      const infl = mesh.morphTargetInfluences;
+    /* ── jaw bone animation (works even with no morph targets) ── */
+    const jawTarget = isSpeaking
+      ? Math.max(0, Math.sin(tc * 9.5) * 0.55 + Math.sin(tc * 5.8) * 0.22) * 0.18
+      : 0;
+    if (jawRef.current) {
+      jawRef.current.rotation.x = L(jawRef.current.rotation.x, -jawTarget, jawTarget > Math.abs(jawRef.current.rotation.x) ? 0.5 : 0.25);
+    }
 
-      /* drive visemes */
-      for (const [key, idx] of Object.entries(dict)) {
-        if (!key.startsWith("viseme_")) continue;
-        const tgt = targets[key] ?? 0;
-        infl[idx] = L(infl[idx], tgt, tgt > infl[idx] ? 0.40 : 0.22);
+    /* ── morph target mouth (for avatars that have them) ── */
+    if (morphMeshes.current.length > 0) {
+      /* compute jaw open amount: time-based, optionally FFT-modulated */
+      let jawOpen = 0;
+      if (isSpeaking) {
+        const raw = Math.max(0, Math.sin(tc * 9.5) * 0.55 + Math.sin(tc * 5.8) * 0.25 + Math.sin(tc * 14.2) * 0.10);
+        jawOpen = raw * 0.80;
+        if (analyserRef?.current) {
+          const amp = fftAmp(analyserRef.current);
+          if (amp > 0.01) jawOpen = raw * Math.min(amp * 5.0, 1.0);
+        }
       }
 
-      /* eye blink — handle both RPM naming conventions */
-      for (const name of ["eyeBlinkLeft","eyeBlinkRight","eyesClosed","eyeBlink"]) {
-        const idx2 = dict[name];
-        if (idx2 !== undefined) infl[idx2] = L(infl[idx2], blink.current, 0.5);
-      }
+      const VISEME_CYCLE = ["viseme_aa","viseme_E","viseme_I","viseme_O","viseme_U","viseme_PP","viseme_kk","viseme_SS","viseme_FF","viseme_TH","viseme_DD","viseme_CH","viseme_nn","viseme_RR"];
+      const cycleIdx = isSpeaking ? Math.floor(tc * 4.5) % VISEME_CYCLE.length : -1;
 
-      /* listening brow raise */
-      const browAmt = isListening ? 0.35 : 0;
-      for (const name of ["browInnerUp","browOuterUpLeft","browOuterUpRight"]) {
-        const idx2 = dict[name];
-        if (idx2 !== undefined) infl[idx2] = L(infl[idx2], browAmt, 0.08);
+      for (const mesh of morphMeshes.current) {
+        const dict = mesh.morphTargetDictionary!;
+        const infl = mesh.morphTargetInfluences!;
+
+        /* jawOpen + mouthOpen driven together */
+        const jiJaw = dict["jawOpen"];
+        const jiMouth = dict["mouthOpen"];
+        if (jiJaw   !== undefined) infl[jiJaw]   = L(infl[jiJaw],   jawOpen,       jawOpen > infl[jiJaw]   ? 0.55 : 0.28);
+        if (jiMouth !== undefined) infl[jiMouth] = L(infl[jiMouth], jawOpen * 0.7, jawOpen > infl[jiMouth] ? 0.55 : 0.28);
+
+        /* viseme cycling — lip shape variety while speaking */
+        for (let vi = 0; vi < VISEME_CYCLE.length; vi++) {
+          const i = dict[VISEME_CYCLE[vi]];
+          if (i !== undefined) {
+            const target = vi === cycleIdx ? jawOpen * 0.55 : 0;
+            infl[i] = L(infl[i], target, 0.28);
+          }
+        }
+        /* silence viseme when not speaking */
+        const iSil = dict["viseme_sil"];
+        if (iSil !== undefined) infl[iSil] = L(infl[iSil], isSpeaking ? 0 : 1, 0.15);
+
+        /* blink */
+        for (const key of ["eyeBlinkLeft","eyeBlinkRight","eyesClosed","eyeBlink"]) {
+          const i = dict[key];
+          if (i !== undefined) infl[i] = L(infl[i], blink.current, 0.5);
+        }
+
+        /* brow raise on listening */
+        const browAmt = isListening ? 0.30 : 0;
+        for (const key of ["browInnerUp","browOuterUpLeft","browOuterUpRight"]) {
+          const i = dict[key];
+          if (i !== undefined) infl[i] = L(infl[i], browAmt, 0.08);
+        }
       }
     }
   });
@@ -181,29 +218,20 @@ function AvatarInner({ isSpeaking, isListening, analyserRef, onReady }: InnerPro
   );
 }
 
-/* ── Scene (lights + avatar) ─────────────────────────────────────────────── */
 function Scene(props: InnerProps) {
   return (
     <>
-      {/* ambient */}
-      <ambientLight intensity={0.55} />
-
-      {/* key light — warm, upper left */}
+      <ambientLight intensity={0.60} />
       <directionalLight
-        position={[-1.5, 3.5, 2.5]} intensity={1.8}
-        color="#fff8f0" castShadow
+        position={[-1.5, 3.5, 2.5]} intensity={1.9} color="#fff8f0" castShadow
         shadow-mapSize-width={1024} shadow-mapSize-height={1024}
-        shadow-camera-near={0.1}  shadow-camera-far={8}
-        shadow-camera-left={-1}   shadow-camera-right={1}
-        shadow-camera-top={1}     shadow-camera-bottom={-1}
+        shadow-camera-near={0.1} shadow-camera-far={8}
+        shadow-camera-left={-1} shadow-camera-right={1}
+        shadow-camera-top={1}   shadow-camera-bottom={-1}
       />
-      {/* fill light — cool, right */}
       <directionalLight position={[2.2, 1.5, 1.8]} intensity={0.55} color="#ddeeff" />
-      {/* rim / back light */}
-      <directionalLight position={[0, 2, -3]} intensity={0.35} color="#ffe8d0" />
-      {/* face up-light (bounce) */}
-      <pointLight position={[0, -0.6, 1.2]} intensity={0.3} color="#ffead5" />
-
+      <directionalLight position={[0, 2, -3]}       intensity={0.35} color="#ffe8d0" />
+      <pointLight       position={[0, -0.6, 1.2]}   intensity={0.32} color="#ffead5" />
       <Suspense fallback={null}>
         <AvatarInner {...props} />
       </Suspense>
@@ -211,8 +239,7 @@ function Scene(props: InnerProps) {
   );
 }
 
-/* ── Public component ────────────────────────────────────────────────────── */
-export default function Avatar3D(props: Avatar3DProps) {
+export default function Avatar3D({ isSpeaking, isListening, analyserRef, onReady }: Avatar3DProps) {
   return (
     <div style={{ position: "absolute", inset: 0, background: "#0d0d0f" }}>
       <Canvas
@@ -221,7 +248,12 @@ export default function Avatar3D(props: Avatar3DProps) {
         style={{ width: "100%", height: "100%", display: "block" }}
         gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
       >
-        <Scene {...props} onReady={() => {}} />
+        <Scene
+          isSpeaking={isSpeaking}
+          isListening={isListening}
+          analyserRef={analyserRef}
+          onReadyInner={onReady ?? (() => {})}
+        />
       </Canvas>
     </div>
   );

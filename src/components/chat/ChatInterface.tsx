@@ -83,7 +83,10 @@ async function playTTS(
 
         let audioCtx: AudioContext | null = null;
         if (analyserRef && typeof AudioContext !== "undefined") {
-          try { audioCtx = new AudioContext(); } catch { /* ignore */ }
+          try {
+            audioCtx = new AudioContext();
+            if (audioCtx.state === "suspended") await audioCtx.resume();
+          } catch { /* ignore */ }
         }
 
         const urls = data.chunks.map((b64: string) => `data:audio/mpeg;base64,${b64}`);
@@ -103,9 +106,10 @@ async function playTTS(
           if (audioCtx && analyserRef) {
             try {
               const src = audioCtx.createMediaElementSource(currentAudio);
-              const node = audioCtx.createAnalyser(); 
-              node.fftSize = 256;
-              src.connect(node); 
+              const node = audioCtx.createAnalyser();
+              node.fftSize = 512;
+              node.smoothingTimeConstant = 0.75;
+              src.connect(node);
               node.connect(audioCtx.destination);
               analyserRef.current = node;
             } catch { /* ignore */ }
@@ -138,11 +142,15 @@ async function playTTS(
     if (analyserRef && typeof AudioContext !== "undefined") {
       try {
         audioCtx = new AudioContext();
+        // Resume context — browser may create it in suspended state
+        if (audioCtx.state === "suspended") await audioCtx.resume();
         const src = audioCtx.createMediaElementSource(audio);
-        const node = audioCtx.createAnalyser(); node.fftSize = 256;
+        const node = audioCtx.createAnalyser();
+        node.fftSize = 512; // more bins = better frequency resolution
+        node.smoothingTimeConstant = 0.75;
         src.connect(node); node.connect(audioCtx.destination);
         analyserRef.current = node;
-      } catch { /* no analyser, still plays */ }
+      } catch { /* no analyser, audio still plays */ }
     }
     const teardown = () => { if (analyserRef) analyserRef.current = null; audioCtx?.close().catch(() => {}); URL.revokeObjectURL(url); };
 
@@ -189,14 +197,17 @@ function SetupScreen({ onStart }: {
 
   const canStart = product.trim().length > 0;
   const handleStart = async () => {
+    const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
-      await navigator.mediaDevices.getDisplayMedia({ 
-        video: { displaySurface: "monitor" },
-        audio: false 
-      });
-    } catch (err) {
-      alert("You must allow both microphone and screen sharing to begin the interview.");
+      if (!isMobileDevice) {
+        await navigator.mediaDevices.getDisplayMedia({ video: { displaySurface: "monitor" }, audio: false });
+      }
+    } catch {
+      alert(isMobileDevice
+        ? "You must allow microphone access to begin the interview."
+        : "You must allow both microphone and screen sharing to begin the interview."
+      );
       return;
     }
     const r: RespondentDetails = {};
@@ -626,13 +637,15 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   const [pendingSpeakText, setPendingSpeakText] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(true);
 
-  const bottomRef      = useRef<HTMLDivElement>(null);
+  const bottomRef        = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recognitionRef = useRef<any>(null);
-  const stopAudioRef   = useRef<(() => void) | null>(null);
-  const taRef          = useRef<HTMLTextAreaElement>(null);
-  const autoStarted    = useRef(false);
-  const analyserRef    = useRef<AnalyserNode | null>(null);
+  const recognitionRef   = useRef<any>(null);
+  const stopAudioRef     = useRef<(() => void) | null>(null);
+  const taRef            = useRef<HTMLTextAreaElement>(null);
+  const autoStarted      = useRef(false);
+  const analyserRef      = useRef<AnalyserNode | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef   = useRef<Blob[]>([]);
 
   const {
     messages, status, isLoading, isSummarizing,
@@ -642,8 +655,9 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   } = useInterviewStore();
 
   useEffect(() => {
-    if (typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition))
-      startTransition(() => setMicSupported(true));
+    const hasSR  = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+    const hasMR  = typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+    if (hasSR || hasMR) startTransition(() => setMicSupported(true));
   }, []);
 
   useEffect(() => {
@@ -759,8 +773,42 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   };
 
   const handleMic = () => {
-    if (isListening) { recognitionRef.current?.stop(); return; }
     if (isLoading) return;
+
+    /* ── MediaRecorder path (mobile, or when SpeechRecognition unavailable) ── */
+    const useMR = isMobile || !(window.SpeechRecognition || window.webkitSpeechRecognition);
+    if (useMR) {
+      if (isListening) {
+        mediaRecorderRef.current?.stop();
+        return;
+      }
+      navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+        const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+        const recorder = new MediaRecorder(stream, { mimeType });
+        audioChunksRef.current = [];
+        recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+        recorder.onstop = async () => {
+          stream.getTracks().forEach((t) => t.stop());
+          setIsListening(false);
+          const blob = new Blob(audioChunksRef.current, { type: mimeType });
+          try {
+            const form = new FormData();
+            form.append("audio", blob, `audio.${mimeType.includes("mp4") ? "mp4" : "webm"}`);
+            form.append("language", LOCALE_BCP47[language]);
+            const res = await fetch("/api/transcribe", { method: "POST", body: form });
+            const { text } = await res.json();
+            if (text?.trim()) sendUserMessage(text.trim());
+          } catch { /* ignore network errors */ }
+        };
+        mediaRecorderRef.current = recorder;
+        recorder.start();
+        setIsListening(true);
+      }).catch(() => setIsListening(false));
+      return;
+    }
+
+    /* ── SpeechRecognition path (desktop) ── */
+    if (isListening) { recognitionRef.current?.stop(); return; }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
     const rec = new SR();
@@ -803,11 +851,11 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
 
 
   return (
-    <div style={{
+    <div className="vt-chat-root" style={{
       display: isMobile ? "flex" : "grid",
       flexDirection: isMobile ? "column" : undefined,
       gridTemplateColumns: isMobile ? undefined : "1fr 400px",
-      height: "100vh", overflow: "hidden",
+      overflow: "hidden",
     }}>
 
       {/* Fullscreen lock — blocks interview if user exits fullscreen */}
@@ -907,7 +955,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
       </div>
 
       {/* ── RIGHT: chat-side ── */}
-      <div style={{ display: "flex", flexDirection: "column", flex: 1, height: isMobile ? "auto" : "100vh", minHeight: 0, background: "var(--bg)" }}>
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden", background: "var(--bg)" }}>
         {/* Chat header */}
         <div style={{ padding: "17px 22px", borderBottom: "1px solid var(--border)", flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
@@ -997,9 +1045,17 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
               <Send size={14} />
             </button>
           </div>
-          <div style={{ fontSize: 11, color: "var(--txt3)", textAlign: "center", marginTop: 7 }}>Enter to send · Shift+Enter for new line</div>
+          <div style={{ fontSize: 11, color: "var(--txt3)", textAlign: "center", marginTop: 7 }}>
+            {isMobile ? "Tap mic to speak · Tap again to send" : "Enter to send · Shift+Enter for new line"}
+          </div>
         </div>
       </div>
+      <style>{`
+        .vt-chat-root { height: 100vh; height: 100dvh; }
+        @media (max-width: 767px) {
+          .vt-chat-root { overflow: hidden; }
+        }
+      `}</style>
     </div>
   );
 }
