@@ -12,7 +12,7 @@ import Image from "next/image";
 function LogoMark() {
   return (
     <div className="w-5.5 h-5.5 rounded-md flex items-center justify-center shrink-0">
-      <Image src="/logo.png" alt="askaisl logo" width={22} height={22} className="object-contain" />
+      <Image src="/logo.png" alt="askaisl logo" width={34} height={34} className="object-contain" />
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { Copy, Check, Plus, X, ChevronDown, ChevronUp, Trash2, Download, FileText, Archive } from "lucide-react";
 import * as XLSX from "xlsx-js-style";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -214,14 +215,7 @@ async function buildWordDoc(session: SessionRow, sessionTranscripts: TranscriptE
 }
 
 function LogoMark() {
-  return (
-    <div className="w-5.5 h-5.5 rounded-md flex items-center justify-center shrink-0"
-      style={{ background: "var(--inv)" }}>
-      <svg viewBox="0 0 12 12" fill="none" width={12} height={12}>
-        <path d="M2 10L6 2l4 8" stroke="var(--inv-txt)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </div>
-  );
+  return <Image src="/logo.png" alt="askaisl" width={34} height={34} style={{ objectFit: "contain", flexShrink: 0 }} />;
 }
 
 function Dots() {

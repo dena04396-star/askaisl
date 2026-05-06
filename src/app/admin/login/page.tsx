@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef } from "react";
+import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, Eye, EyeOff } from "lucide-react";
 
@@ -50,13 +52,19 @@ export default function AdminLoginPage() {
         border: "1px solid var(--border)", background: "var(--bg2)",
         boxShadow: "0 24px 64px rgba(0,0,0,0.12)",
       }}>
+        {/* Logo */}
+        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 8, textDecoration: "none", marginBottom: 32 }}>
+          <Image src="/logo.png" alt="askaisl" width={36} height={36} style={{ objectFit: "contain" }} />
+          <span style={{ fontFamily: "var(--font-serif)", fontSize: 18, fontWeight: 500, color: "var(--txt)" }}>askaisl</span>
+        </Link>
+
         {/* Icon */}
         <div style={{
-          width: 52, height: 52, borderRadius: 14, marginBottom: 24,
+          width: 48, height: 48, borderRadius: 12, marginBottom: 20,
           background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)",
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
-          <ShieldCheck size={24} color="#6366f1" />
+          <ShieldCheck size={22} color="#6366f1" />
         </div>
 
         <h1 style={{

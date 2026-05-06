@@ -2,19 +2,10 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { getBrowserClient } from "@/lib/auth/client";
 import { useAuth } from "@/components/auth/AuthProvider";
-
-function LogoMark() {
-  return (
-    <div style={{ width: 22, height: 22, borderRadius: 6, background: "var(--inv)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-      <svg viewBox="0 0 12 12" fill="none" width={12} height={12}>
-        <path d="M2 10L6 2l4 8" stroke="var(--inv-txt)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </div>
-  );
-}
 
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "12px 14px", background: "var(--bg2)", color: "var(--txt)",
@@ -61,8 +52,9 @@ export default function LoginPage() {
     <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
       <div style={{ width: "100%", maxWidth: 400 }}>
 
-        <Link href="/" style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 500, color: "var(--txt)", textDecoration: "none", display: "flex", alignItems: "center", gap: 8, marginBottom: 40, justifyContent: "center" }}>
-          <LogoMark /> askaisl
+        <Link href="/" style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 8, marginBottom: 40, justifyContent: "center" }}>
+          <Image src="/logo.png" alt="askaisl" width={40} height={40} style={{ objectFit: "contain" }} />
+          <span style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 500, color: "var(--txt)" }}>askaisl</span>
         </Link>
 
         <div style={{ padding: "40px", border: "1px solid var(--border)", borderRadius: 18, background: "var(--bg)", boxShadow: "var(--shadow-lg)" }}>

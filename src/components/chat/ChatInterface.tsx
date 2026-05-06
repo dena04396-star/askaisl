@@ -31,37 +31,47 @@ const STUDY_OPTIONS: { id: StudyType; label: string; description: string }[] = [
 ];
 
 
-/* ─── TTS: ElevenLabs primary, Web Speech fallback ── */
-const FEMALE_KEYS = ["female","woman","samantha","google uk english female","google us english female","fiona","victoria","karen","moira","veena","zira","hazel","nora","aria","jenny","sonia","natasha","leah","raveena","latha","alva","eva","cortana","elsa","amelie","ioana","mariam","kyoko","sin-ji","mei-jia","zosia","milena","paulina","laura","alice"];
-const MALE_KEYS   = ["male","man","david","james","daniel","richard","mark","thomas","george","alex","fred","paul","tom","jorge","oliver","wayne","henry","luca","xander","bruce","lee","carlos","diego","reed"];
-
-function isFemaleVoice(v: SpeechSynthesisVoice) {
-  const n = v.name.toLowerCase();
-  if (FEMALE_KEYS.some(f => n.includes(f))) return true;
-  if (MALE_KEYS.some(m => n.includes(m))) return false;
-  return true; // unknown → assume female rather than default-to-male
+/* ─── TTS: SpeechGen primary, Google TTS fallback ── */
+function attachAnalyser(audio: HTMLAudioElement, analyserRef: { current: AnalyserNode | null }): { ctx: AudioContext | null; teardown: () => void } {
+  if (typeof AudioContext === "undefined") return { ctx: null, teardown: () => {} };
+  try {
+    const ctx = new AudioContext();
+    const resume = ctx.state === "suspended" ? ctx.resume() : Promise.resolve();
+    resume.catch(() => {});
+    const src  = ctx.createMediaElementSource(audio);
+    const node = ctx.createAnalyser();
+    node.fftSize = 512;
+    node.smoothingTimeConstant = 0.75;
+    src.connect(node);
+    node.connect(ctx.destination);
+    analyserRef.current = node;
+    return { ctx, teardown: () => { analyserRef.current = null; ctx.close().catch(() => {}); } };
+  } catch {
+    return { ctx: null, teardown: () => { analyserRef.current = null; } };
+  }
 }
 
-function pickVoice(lang: string): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices.length) return null;
-  const prefix = lang.split("-")[0];
+function playAudio(
+  audio: HTMLAudioElement,
+  total: number,
+  onStart: () => void,
+  onEnd: () => void,
+  onWord?: (n: number) => void,
+  analyserRef?: { current: AnalyserNode | null },
+  revokeUrl?: string,
+): () => void {
+  const { teardown } = analyserRef ? attachAnalyser(audio, analyserRef) : { teardown: () => {} };
+  const done = () => { teardown(); if (revokeUrl) URL.revokeObjectURL(revokeUrl); onEnd(); };
 
-  /* 1 – exact locale, female */
-  const exactF = voices.find(v => v.lang === lang && isFemaleVoice(v));
-  if (exactF) return exactF;
-
-  /* 2 – lang prefix, female */
-  const preF = voices.find(v => v.lang.startsWith(prefix) && isFemaleVoice(v));
-  if (preF) return preF;
-
-  /* 3 – si/ta: native voice only — do NOT fall back to English (English voice skips Sinhala/Tamil glyphs and speaks only numbers) */
-  if (prefix === "si" || prefix === "ta") {
-    return voices.find(v => v.lang.startsWith(prefix)) ?? null;
-  }
-
-  /* 4 – any voice for the language (last resort) */
-  return voices.find(v => v.lang.startsWith(prefix)) ?? null;
+  audio.onplay = onStart;
+  audio.ontimeupdate = () => {
+    if (!onWord || !isFinite(audio.duration) || !audio.duration) return;
+    onWord(Math.min(Math.ceil((audio.currentTime / audio.duration) * total), total));
+  };
+  audio.onended = () => { onWord?.(total); done(); };
+  audio.onerror = () => { onWord?.(total); done(); };
+  audio.play().catch(() => { onWord?.(total); done(); });
+  return () => { audio.pause(); teardown(); if (revokeUrl) URL.revokeObjectURL(revokeUrl); onEnd(); };
 }
 
 async function playTTS(
@@ -70,96 +80,54 @@ async function playTTS(
   analyserRef?: { current: AnalyserNode | null },
 ): Promise<() => void> {
   const total = text.split(/\s+/).filter(Boolean).length;
-  try {
-    const res = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, language: lang }) });
-    if (!res.ok) throw new Error(`TTS ${res.status}`);
-    const contentType = res.headers.get("Content-Type") || "";
-    if (contentType.includes("application/json")) {
-      const data = await res.json();
-      if (data.fallback && data.chunks && data.chunks.length > 0) {
-        let currentIdx = 0;
-        let currentAudio: HTMLAudioElement | null = null;
-        let isCancelled = false;
 
-        let audioCtx: AudioContext | null = null;
-        if (analyserRef && typeof AudioContext !== "undefined") {
+  try {
+    const res = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, language: lang }),
+    });
+    if (!res.ok) throw new Error(`TTS ${res.status}`);
+
+    const contentType = res.headers.get("Content-Type") || "";
+
+    /* Google TTS fallback — chunked base64 */
+    if (contentType.includes("application/json")) {
+      const { chunks } = await res.json() as { fallback: boolean; chunks: string[] };
+      let idx = 0;
+      let current: HTMLAudioElement | null = null;
+      let cancelled = false;
+      let ctx: AudioContext | null = null;
+      if (analyserRef && typeof AudioContext !== "undefined") {
+        try { ctx = new AudioContext(); if (ctx.state === "suspended") await ctx.resume(); } catch { /* ignore */ }
+      }
+      const teardown = () => { if (analyserRef) analyserRef.current = null; ctx?.close().catch(() => {}); };
+      const playNext = () => {
+        if (cancelled || idx >= chunks.length) { teardown(); onWord?.(total); onEnd(); return; }
+        current = new Audio(`data:audio/mpeg;base64,${chunks[idx]}`);
+        if (ctx && analyserRef) {
           try {
-            audioCtx = new AudioContext();
-            if (audioCtx.state === "suspended") await audioCtx.resume();
+            const src = ctx.createMediaElementSource(current);
+            const node = ctx.createAnalyser(); node.fftSize = 512; node.smoothingTimeConstant = 0.75;
+            src.connect(node); node.connect(ctx.destination);
+            analyserRef.current = node;
           } catch { /* ignore */ }
         }
-
-        const urls = data.chunks.map((b64: string) => `data:audio/mpeg;base64,${b64}`);
-
-        const playNext = () => {
-          if (isCancelled) return;
-          if (currentIdx >= urls.length) {
-            if (analyserRef) analyserRef.current = null;
-            audioCtx?.close().catch(() => {});
-            onWord?.(total);
-            onEnd();
-            return;
-          }
-
-          currentAudio = new Audio(urls[currentIdx]);
-          
-          if (audioCtx && analyserRef) {
-            try {
-              const src = audioCtx.createMediaElementSource(currentAudio);
-              const node = audioCtx.createAnalyser();
-              node.fftSize = 512;
-              node.smoothingTimeConstant = 0.75;
-              src.connect(node);
-              node.connect(audioCtx.destination);
-              analyserRef.current = node;
-            } catch { /* ignore */ }
-          }
-
-          if (currentIdx === 0) onStart();
-
-          currentAudio.onended = () => { currentIdx++; playNext(); };
-          currentAudio.onerror = () => { currentIdx++; playNext(); };
-          currentAudio.play().catch(() => { currentIdx++; playNext(); });
-        };
-
-        playNext();
-
-        return () => {
-          isCancelled = true;
-          if (currentAudio) currentAudio.pause();
-          if (analyserRef) analyserRef.current = null;
-          audioCtx?.close().catch(() => {});
-          onWord?.(total);
-          onEnd();
-        };
-      }
+        if (idx === 0) onStart();
+        current.onended = () => { idx++; playNext(); };
+        current.onerror = () => { idx++; playNext(); };
+        current.play().catch(() => { idx++; playNext(); });
+        if (onWord) onWord(Math.round((idx / chunks.length) * total));
+        idx++;
+      };
+      playNext();
+      return () => { cancelled = true; current?.pause(); teardown(); onEnd(); };
     }
 
+    /* SpeechGen — audio/mpeg blob */
     const url = URL.createObjectURL(await res.blob());
-    const audio = new Audio(url);
+    return playAudio(new Audio(url), total, onStart, onEnd, onWord, analyserRef, url);
 
-    let audioCtx: AudioContext | null = null;
-    if (analyserRef && typeof AudioContext !== "undefined") {
-      try {
-        audioCtx = new AudioContext();
-        // Resume context — browser may create it in suspended state
-        if (audioCtx.state === "suspended") await audioCtx.resume();
-        const src = audioCtx.createMediaElementSource(audio);
-        const node = audioCtx.createAnalyser();
-        node.fftSize = 512; // more bins = better frequency resolution
-        node.smoothingTimeConstant = 0.75;
-        src.connect(node); node.connect(audioCtx.destination);
-        analyserRef.current = node;
-      } catch { /* no analyser, audio still plays */ }
-    }
-    const teardown = () => { if (analyserRef) analyserRef.current = null; audioCtx?.close().catch(() => {}); URL.revokeObjectURL(url); };
-
-    audio.onplay = onStart;
-    audio.ontimeupdate = () => { if (!onWord || !isFinite(audio.duration) || !audio.duration) return; onWord(Math.min(Math.ceil((audio.currentTime / audio.duration) * total), total)); };
-    audio.onended = () => { onWord?.(total); teardown(); onEnd(); };
-    audio.onerror = () => { onWord?.(total); teardown(); onEnd(); };
-    audio.play().catch(() => { onWord?.(total); teardown(); onEnd(); });
-    return () => { audio.pause(); teardown(); onEnd(); };
   } catch {
     if (analyserRef) analyserRef.current = null;
     if (typeof window === "undefined") return () => {};
@@ -167,14 +135,18 @@ async function playTTS(
     const utter = new SpeechSynthesisUtterance(text);
     utter.rate = 0.88; utter.pitch = 1.25;
     const go = () => {
-      const v = pickVoice(lang);
-      /* No voice found for this language (common for si/ta on desktop) — skip TTS, just show text */
+      const voices = window.speechSynthesis.getVoices();
+      const prefix = lang.split("-")[0];
+      const v = voices.find(vv => vv.lang === lang) ?? voices.find(vv => vv.lang.startsWith(prefix)) ?? null;
       if (!v) { onStart(); onWord?.(total); onEnd(); return; }
       utter.voice = v; utter.lang = v.lang;
-      utter.onstart = onStart;
-      utter.onend   = () => { onWord?.(total); onEnd(); };
-      utter.onerror = () => { onWord?.(total); onEnd(); };
-      utter.onboundary = (e: SpeechSynthesisEvent) => { if (e.name === "word" && onWord) onWord(text.slice(0, e.charIndex).split(/\s+/).filter(Boolean).length + 1); };
+      utter.onstart  = onStart;
+      utter.onend    = () => { onWord?.(total); onEnd(); };
+      utter.onerror  = () => { onWord?.(total); onEnd(); };
+      utter.onboundary = (e: SpeechSynthesisEvent) => {
+        if (e.name === "word" && onWord)
+          onWord(text.slice(0, e.charIndex).split(/\s+/).filter(Boolean).length + 1);
+      };
       window.speechSynthesis.speak(utter);
     };
     window.speechSynthesis.getVoices().length === 0 ? (window.speechSynthesis.onvoiceschanged = go) : go();
@@ -722,16 +694,15 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
 
   const speak = useCallback(async (text: string) => {
     if (avatarHandlesTTS) {
-      /* LiveAvatar speaks — just pass the text, it fires onSpeakStart/End itself */
       setPendingSpeakText(text);
       return;
     }
     stopAudioRef.current?.();
     stopAudioRef.current = null;
-    setRevealedWords(0);
+    /* keep text visible while TTS loads — hide only when audio actually starts */
     const cleanup = await playTTS(
       text,
-      () => setIsSpeaking(true),
+      () => { setIsSpeaking(true); setRevealedWords(0); },
       () => { setIsSpeaking(false); setRevealedWords(-1); },
       LOCALE_BCP47[language],
       (n) => setRevealedWords(n),

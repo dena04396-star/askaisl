@@ -42,8 +42,8 @@ function AvatarInner({ isSpeaking, isListening, analyserRef, onReadyInner }: Inn
   const jawRef    = useRef<THREE.Object3D | null>(null);
 
   /* base arm angles — RPM/Mixamo rig: z brings arm down from T-pose */
-  const lBase = useRef({ z: 1.50, x: 0.10, y: -0.18 });
-  const rBase = useRef({ z: -1.50, x: 0.10, y:  0.18 });
+  const lBase = useRef({ z: 1.65, x: 0.06, y: -0.10 });
+  const rBase = useRef({ z: -1.65, x: 0.06, y:  0.10 });
 
   /* time / blink */
   const t        = useRef(0);

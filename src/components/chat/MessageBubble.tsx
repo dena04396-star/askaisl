@@ -11,10 +11,20 @@ function renderKaraoke(content: string, revealedWords: number) {
   let wi = 0;
   return tokens.map((t, i) => {
     if (/^\s+$/.test(t)) return <span key={i}>{t}</span>;
-    const isCurrent = wi++ === revealedWords - 1;
-    return isCurrent
-      ? <mark key={i} className="karaoke">{t}</mark>
-      : <span key={i}>{t}</span>;
+    const idx = wi++;
+    const visible = idx < revealedWords;
+    return (
+      <span
+        key={i}
+        style={{
+          opacity: visible ? 1 : 0,
+          transition: "opacity 0.08s ease",
+          display: "inline",
+        }}
+      >
+        {t}
+      </span>
+    );
   });
 }
 
