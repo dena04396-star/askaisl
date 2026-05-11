@@ -57,8 +57,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    /* Keep last 10 turns only — shorter context = faster first-token time */
-    const recentMessages: ChatMessage[] = (messages as ChatMessage[]).slice(-10);
+    /* Keep last 14 turns — enough history for anti-repetition checks */
+    const recentMessages: ChatMessage[] = (messages as ChatMessage[]).slice(-14);
 
     /* Stream the response */
     const stream = await openai.chat.completions.create({
@@ -68,8 +68,9 @@ export async function POST(req: NextRequest) {
         ...recentMessages.map((m) => ({ role: m.role, content: m.content })),
       ],
       temperature: 0.65,
-      max_tokens: 200,        /* Short interview questions need ≤200 tokens */
-      frequency_penalty: 0.3, /* Prevent repetitive filler phrases */
+      max_tokens: 200,
+      frequency_penalty: 0.4,
+      presence_penalty: 0.5,  /* Penalise topics already mentioned — reduces question repetition */
       stream: true,
     });
 

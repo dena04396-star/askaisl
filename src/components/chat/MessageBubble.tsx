@@ -17,8 +17,8 @@ function renderKaraoke(content: string, revealedWords: number) {
       <span
         key={i}
         style={{
-          opacity: visible ? 1 : 0,
-          transition: "opacity 0.08s ease",
+          opacity: visible ? 1 : 0.28,
+          transition: visible ? "opacity 0.12s ease" : "none",
           display: "inline",
         }}
       >

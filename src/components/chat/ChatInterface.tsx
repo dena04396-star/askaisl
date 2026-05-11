@@ -66,7 +66,8 @@ function playAudio(
   audio.onplay = onStart;
   audio.ontimeupdate = () => {
     if (!onWord || !isFinite(audio.duration) || !audio.duration) return;
-    onWord(Math.min(Math.ceil((audio.currentTime / audio.duration) * total), total));
+    // +1 so at least one word is lit from the very first frame of audio
+    onWord(Math.min(Math.ceil((audio.currentTime / audio.duration) * total) + 1, total));
   };
   audio.onended = () => { onWord?.(total); done(); };
   audio.onerror = () => { onWord?.(total); done(); };
@@ -600,6 +601,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   const [input, setInput]             = useState("");
   const [isSpeaking, setIsSpeaking]   = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [isTTSLoading, setIsTTSLoading] = useState(false);
   const [micSupported, setMicSupported] = useState(false);
   const [revealedWords, setRevealedWords] = useState(-1);
   const [seconds, setSeconds]         = useState(0);
@@ -608,6 +610,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   const [avatarHandlesTTS, setAvatarHandlesTTS] = useState(false);
   const [pendingSpeakText, setPendingSpeakText] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(true);
+  const [langOverride, setLangOverride] = useState<Locale | null>(null);
 
   const bottomRef        = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -618,6 +621,8 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   const analyserRef      = useRef<AnalyserNode | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef   = useRef<Blob[]>([]);
+  const handleMicRef     = useRef<() => void>(() => {});
+  const prevSpeakingRef  = useRef(false);
 
   const {
     messages, status, isLoading, isSummarizing,
@@ -692,6 +697,8 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
 
   const timerStr = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 
+  const activeLang = langOverride ?? language;
+
   const speak = useCallback(async (text: string) => {
     if (avatarHandlesTTS) {
       setPendingSpeakText(text);
@@ -699,17 +706,28 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
     }
     stopAudioRef.current?.();
     stopAudioRef.current = null;
-    /* keep text visible while TTS loads — hide only when audio actually starts */
+    setRevealedWords(0);   // dim all words immediately — they light up as audio plays
+    setIsTTSLoading(true);
+    let started = false;
     const cleanup = await playTTS(
       text,
-      () => { setIsSpeaking(true); setRevealedWords(0); },
-      () => { setIsSpeaking(false); setRevealedWords(-1); },
-      LOCALE_BCP47[language],
+      () => {
+        started = true;
+        setIsTTSLoading(false);
+        setIsSpeaking(true);
+        // revealedWords stays at 0 — ontimeupdate lights words up in sync with audio
+      },
+      () => {
+        if (!started) setIsTTSLoading(false);
+        setIsSpeaking(false);
+        setRevealedWords(-1); // all words fully visible again after speaking ends
+      },
+      LOCALE_BCP47[activeLang],
       (n) => setRevealedWords(n),
       analyserRef,
     );
     stopAudioRef.current = cleanup;
-  }, [language, avatarHandlesTTS]);
+  }, [activeLang, avatarHandlesTTS]);
 
   const lastAssistantMsg = messages.filter((m) => m.role === "assistant").at(-1);
   const spokenRef  = useRef<number>(-1);
@@ -732,6 +750,16 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [avatarHandlesTTS]);
 
+  /* ── Auto-listen: start mic automatically after avatar finishes speaking ── */
+  useEffect(() => {
+    if (prevSpeakingRef.current && !isSpeaking && !isLoading && !isListening && status === "active" && !showClosingBanner) {
+      const t = setTimeout(() => handleMicRef.current(), 700);
+      return () => clearTimeout(t);
+    }
+    prevSpeakingRef.current = isSpeaking;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSpeaking]);
+
   const handleSend = async () => {
     const text = input.trim();
     if (!text || isLoading) return;
@@ -744,8 +772,9 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   };
 
   const handleMic = () => {
-    if (isLoading) return;
+    if (isLoading || isSpeaking || isTTSLoading) return;
 
+    handleMicRef.current = handleMic; // keep ref current
     /* ── MediaRecorder path (mobile, or when SpeechRecognition unavailable) ── */
     const useMR = isMobile || !(window.SpeechRecognition || window.webkitSpeechRecognition);
     if (useMR) {
@@ -765,7 +794,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
           try {
             const form = new FormData();
             form.append("audio", blob, `audio.${mimeType.includes("mp4") ? "mp4" : "webm"}`);
-            form.append("language", LOCALE_BCP47[language]);
+            form.append("language", LOCALE_BCP47[activeLang]);
             const res = await fetch("/api/transcribe", { method: "POST", body: form });
             const { text } = await res.json();
             if (text?.trim()) sendUserMessage(text.trim());
@@ -783,7 +812,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
     const rec = new SR();
-    rec.lang = LOCALE_BCP47[language];
+    rec.lang = LOCALE_BCP47[activeLang];
     rec.continuous = false;
     rec.interimResults = false;
     let captured = "";
@@ -801,8 +830,11 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
     rec.start();
   };
 
+  /* Keep handleMicRef pointing at latest handleMic (defined above, after this) */
+  useEffect(() => { handleMicRef.current = handleMic; });
+
   /* Status state */
-  const statusLabel = isSpeaking ? "Speaking" : isLoading ? "Thinking" : isListening ? "Listening" : "Ready";
+  const statusLabel = isSpeaking ? "Speaking" : isTTSLoading ? "Preparing…" : isLoading ? "Thinking…" : isListening ? "Listening" : "Ready";
   const statusDotStyle: React.CSSProperties = {
     width: 6, height: 6, borderRadius: "50%", transition: "all 0.3s",
     background: isSpeaking ? "var(--txt)" : isLoading ? "#d97706" : isListening ? "#16a34a" : "var(--txt3)",
@@ -928,24 +960,40 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
       {/* ── RIGHT: chat-side ── */}
       <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden", background: "var(--bg)" }}>
         {/* Chat header */}
-        <div style={{ padding: "17px 22px", borderBottom: "1px solid var(--border)", flexShrink: 0, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 500, color: "var(--txt)" }}>Transcript</div>
-            <div style={{ fontSize: 12, color: "var(--txt3)", marginTop: 2 }}>
-              {LOCALE_LABELS[language]} · {STUDY_OPTIONS.find((s) => s.id === study?.studyType)?.label ?? "Interview"}
+        <div style={{ padding: "13px 18px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 500, color: "var(--txt)" }}>Transcript</div>
+              <div style={{ fontSize: 12, color: "var(--txt3)", marginTop: 1 }}>
+                {LOCALE_LABELS[activeLang]} · {STUDY_OPTIONS.find((s) => s.id === study?.studyType)?.label ?? "Interview"}
+              </div>
             </div>
+            <button
+              onClick={() => { navigator.clipboard.writeText(window.location.href); setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000); }}
+              className="vt-btn-ghost"
+              style={{ padding: "7px 12px", fontSize: 12, display: "flex", alignItems: "center", gap: 5, color: linkCopied ? "#16a34a" : "inherit" }}
+            >
+              {linkCopied ? <><Check size={12} /> Copied!</> : <><Copy size={12} /> Copy Link</>}
+            </button>
           </div>
-          <button 
-            onClick={() => {
-              navigator.clipboard.writeText(window.location.href);
-              setLinkCopied(true);
-              setTimeout(() => setLinkCopied(false), 2000);
-            }}
-            className="vt-btn-ghost" 
-            style={{ padding: "8px 14px", fontSize: 12, display: "flex", alignItems: "center", gap: 6, color: linkCopied ? "#16a34a" : "inherit" }}
-          >
-            {linkCopied ? <><Check size={13} /> Copied!</> : <><Copy size={13} /> Copy Link</>}
-          </button>
+          {/* Language switcher */}
+          <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+            <span style={{ fontSize: 10.5, color: "var(--txt3)", textTransform: "uppercase", letterSpacing: "0.06em", marginRight: 4 }}>Language:</span>
+            {(Object.entries(LOCALE_LABELS) as [Locale, string][]).map(([code, label]) => (
+              <button key={code} onClick={() => {
+                setLangOverride(code === language ? null : code);
+                const msg = code === activeLang ? null :
+                  `Please switch to speaking in ${LOCALE_LABELS[code]} from this point. Ask your next question in ${LOCALE_LABELS[code]}.`;
+                if (msg) sendUserMessage(msg);
+              }}
+              style={{
+                padding: "4px 10px", borderRadius: 6, fontSize: 12, cursor: "pointer", transition: "all 0.12s", fontFamily: "inherit", border: "1px solid",
+                background: activeLang === code ? "var(--inv)" : "transparent",
+                color:      activeLang === code ? "var(--inv-txt)" : "var(--txt3)",
+                borderColor: activeLang === code ? "transparent" : "var(--border)",
+              }}>{label}</button>
+            ))}
+          </div>
         </div>
 
         {/* Closing banner */}
