@@ -8,6 +8,7 @@ import * as THREE from "three";
 export interface Avatar3DProps {
   isSpeaking:   boolean;
   isListening?: boolean;
+  isLoading?:   boolean;
   analyserRef?: MutableRefObject<AnalyserNode | null>;
   onReady?:     () => void;
 }
@@ -27,7 +28,7 @@ function fftAmp(analyser: AnalyserNode): number {
 /* ── Inner component (inside Canvas) ─────────────────────────────────────── */
 interface InnerProps extends Avatar3DProps { onReadyInner: () => void; }
 
-function AvatarInner({ isSpeaking, isListening, analyserRef, onReadyInner }: InnerProps) {
+function AvatarInner({ isSpeaking, isListening, isLoading, analyserRef, onReadyInner }: InnerProps) {
   const { scene } = useGLTF(AVATAR_URL);
 
   /* morph-target mesh — auto-discovered (supports Wolf3D_ AND avaturn_ avatars) */
@@ -41,9 +42,8 @@ function AvatarInner({ isSpeaking, isListening, analyserRef, onReadyInner }: Inn
   const rForeRef  = useRef<THREE.Object3D | null>(null);
   const jawRef    = useRef<THREE.Object3D | null>(null);
 
-  /* base arm angles — RPM/Mixamo rig: z brings arm down from T-pose */
-  const lBase = useRef({ z: 1.65, x: 0.06, y: -0.10 });
-  const rBase = useRef({ z: -1.65, x: 0.06, y:  0.10 });
+  const lBase = useRef({ z: 1.2, x: -0.1, y: 0 });
+  const rBase = useRef({ z: -1.2, x: -0.1, y: 0 });
 
   /* time / blink */
   const t        = useRef(0);
@@ -82,25 +82,22 @@ function AvatarInner({ isSpeaking, isListening, analyserRef, onReadyInner }: Inn
     /* Head bone for sway */
     headBone.current = scene.getObjectByName("Head") ?? null;
 
-    /* Arm bones — exact names from this GLB */
+    /* bone lookup — try standard RPM name, then mixamorig prefix */
+    const get = (name: string) =>
+      scene.getObjectByName(name) ?? scene.getObjectByName("mixamorig" + name) ?? null;
+
+    const la = get("LeftArm");
+    const ra = get("RightArm");
+    const lf = get("LeftForeArm");
+    const rf = get("RightForeArm");
+
     const lb = lBase.current;
     const rb = rBase.current;
 
-    const la = scene.getObjectByName("LeftArm");
     if (la) { la.rotation.set(lb.x, lb.y, lb.z); lArmRef.current = la; }
-
-    const ra = scene.getObjectByName("RightArm");
     if (ra) { ra.rotation.set(rb.x, rb.y, rb.z); rArmRef.current = ra; }
-
-    const lf = scene.getObjectByName("LeftForeArm");
-    if (lf) { lf.rotation.set(0.05, -1.1, 0.0); lForeRef.current = lf; }
-
-    const rf = scene.getObjectByName("RightForeArm");
-    if (rf) { rf.rotation.set(0.05, 1.1, 0.0); rForeRef.current = rf; }
-
-    if (process.env.NODE_ENV === "development") {
-      console.debug("[Avatar3D] morph meshes:", found.map(m => m.name + " (" + Object.keys(m.morphTargetDictionary!).length + " targets)"));
-    }
+    if (lf) { lf.rotation.set(0, 0, 0); lForeRef.current = lf; }
+    if (rf) { rf.rotation.set(0, 0, 0); rForeRef.current = rf; }
 
     onReadyInner();
   }, [scene, onReadyInner]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -129,39 +126,42 @@ function AvatarInner({ isSpeaking, isListening, analyserRef, onReadyInner }: Inn
       eyeWait.current = 2 + Math.random() * 5;
     }
 
-    /* head idle sway */
+    /* head idle sway — subtle thinking nod when isLoading */
     if (headBone.current) {
-      const spd = isSpeaking ? 1.4 : 0.5;
+      const spd = isSpeaking ? 1.4 : isLoading ? 0.9 : 0.5;
+      const tiltX = isLoading ? Math.sin(tc * 0.6) * 0.04 + 0.025 : 0; // slight downward thinking tilt
       headBone.current.rotation.y = L(headBone.current.rotation.y, Math.sin(tc * spd * 0.4) * 0.06 + eyeX.current, 0.05);
-      headBone.current.rotation.x = L(headBone.current.rotation.x, Math.sin(tc * spd * 0.3) * 0.03 + eyeY.current, 0.05);
+      headBone.current.rotation.x = L(headBone.current.rotation.x, Math.sin(tc * spd * 0.3) * 0.03 + eyeY.current + tiltX, 0.05);
       headBone.current.rotation.z = L(headBone.current.rotation.z, Math.sin(tc * spd * 0.25) * 0.015, 0.05);
     }
 
     /* arms static at sides */
     if (lArmRef.current) {
       const lb = lBase.current;
-      lArmRef.current.rotation.z = L(lArmRef.current.rotation.z, lb.z, 0.04);
+      lArmRef.current.rotation.x = L(lArmRef.current.rotation.x, lb.x, 0.04);
       lArmRef.current.rotation.y = L(lArmRef.current.rotation.y, lb.y, 0.04);
+      lArmRef.current.rotation.z = L(lArmRef.current.rotation.z, lb.z, 0.04);
     }
     if (rArmRef.current) {
       const rb = rBase.current;
-      rArmRef.current.rotation.z = L(rArmRef.current.rotation.z, rb.z, 0.04);
+      rArmRef.current.rotation.x = L(rArmRef.current.rotation.x, rb.x, 0.04);
       rArmRef.current.rotation.y = L(rArmRef.current.rotation.y, rb.y, 0.04);
+      rArmRef.current.rotation.z = L(rArmRef.current.rotation.z, rb.z, 0.04);
     }
 
-    /* ── jaw bone animation (works even with no morph targets) ── */
-    const jawTarget = isSpeaking
+    /* ── jaw bone animation — never moves during loading/thinking ── */
+    const jawTarget = (isSpeaking && !isLoading)
       ? Math.max(0, Math.sin(tc * 9.5) * 0.55 + Math.sin(tc * 5.8) * 0.22) * 0.18
       : 0;
     if (jawRef.current) {
-      jawRef.current.rotation.x = L(jawRef.current.rotation.x, -jawTarget, jawTarget > Math.abs(jawRef.current.rotation.x) ? 0.5 : 0.25);
+      // open: 0.5 lerp (fast open), close: 0.6 lerp (snap shut quickly)
+      jawRef.current.rotation.x = L(jawRef.current.rotation.x, -jawTarget, jawTarget > Math.abs(jawRef.current.rotation.x) ? 0.5 : 0.6);
     }
 
-    /* ── morph target mouth (for avatars that have them) ── */
+    /* ── morph target mouth — mouth stays closed during loading/thinking ── */
     if (morphMeshes.current.length > 0) {
-      /* compute jaw open amount: time-based, optionally FFT-modulated */
       let jawOpen = 0;
-      if (isSpeaking) {
+      if (isSpeaking && !isLoading) {
         const raw = Math.max(0, Math.sin(tc * 9.5) * 0.55 + Math.sin(tc * 5.8) * 0.25 + Math.sin(tc * 14.2) * 0.10);
         jawOpen = raw * 0.80;
         if (analyserRef?.current) {
@@ -180,8 +180,8 @@ function AvatarInner({ isSpeaking, isListening, analyserRef, onReadyInner }: Inn
         /* jawOpen + mouthOpen driven together */
         const jiJaw = dict["jawOpen"];
         const jiMouth = dict["mouthOpen"];
-        if (jiJaw   !== undefined) infl[jiJaw]   = L(infl[jiJaw],   jawOpen,       jawOpen > infl[jiJaw]   ? 0.55 : 0.28);
-        if (jiMouth !== undefined) infl[jiMouth] = L(infl[jiMouth], jawOpen * 0.7, jawOpen > infl[jiMouth] ? 0.55 : 0.28);
+        if (jiJaw   !== undefined) infl[jiJaw]   = L(infl[jiJaw],   jawOpen,       jawOpen > infl[jiJaw]   ? 0.55 : 0.55);
+        if (jiMouth !== undefined) infl[jiMouth] = L(infl[jiMouth], jawOpen * 0.7, jawOpen > infl[jiMouth] ? 0.55 : 0.55);
 
         /* viseme cycling — lip shape variety while speaking */
         for (let vi = 0; vi < VISEME_CYCLE.length; vi++) {
@@ -201,8 +201,11 @@ function AvatarInner({ isSpeaking, isListening, analyserRef, onReadyInner }: Inn
           if (i !== undefined) infl[i] = L(infl[i], blink.current, 0.5);
         }
 
-        /* brow raise on listening */
+        /* brow: raise on listening, slight furrow when thinking */
         const browAmt = isListening ? 0.30 : 0;
+        const browDownAmt = isLoading ? 0.20 : 0;
+        const browDown = ["browDownLeft","browDownRight"];
+        for (const key of browDown) { const i = dict[key]; if (i !== undefined) infl[i] = L(infl[i], browDownAmt, 0.07); }
         for (const key of ["browInnerUp","browOuterUpLeft","browOuterUpRight"]) {
           const i = dict[key];
           if (i !== undefined) infl[i] = L(infl[i], browAmt, 0.08);
@@ -239,7 +242,7 @@ function Scene(props: InnerProps) {
   );
 }
 
-export default function Avatar3D({ isSpeaking, isListening, analyserRef, onReady }: Avatar3DProps) {
+export default function Avatar3D({ isSpeaking, isListening, isLoading, analyserRef, onReady }: Avatar3DProps) {
   return (
     <div style={{ position: "absolute", inset: 0, background: "#0d0d0f" }}>
       <Canvas
@@ -251,6 +254,7 @@ export default function Avatar3D({ isSpeaking, isListening, analyserRef, onReady
         <Scene
           isSpeaking={isSpeaking}
           isListening={isListening}
+          isLoading={isLoading}
           analyserRef={analyserRef}
           onReadyInner={onReady ?? (() => {})}
         />

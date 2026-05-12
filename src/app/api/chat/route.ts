@@ -4,11 +4,6 @@ import { buildSystemPrompt } from "@/lib/ai/prompts";
 import { isValidLocale } from "@/lib/i18n/config";
 import type { Locale, StudyContext, ChatMessage } from "@/types";
 
-// In-memory cache for opening greetings (keyed by locale+studyType+product)
-// Avoids a full LLM round-trip when many respondents start the same session
-const greetingCache = new Map<string, { reply: string; ts: number }>();
-const GREETING_TTL = 60 * 60 * 1000; // 1 hour
-
 export async function POST(req: NextRequest) {
   try {
     const { messages, language, sessionId, study, customGuide } = await req.json();
@@ -34,29 +29,6 @@ export async function POST(req: NextRequest) {
 
     const messageCount = (messages as ChatMessage[]).filter((m) => m.role === "user").length;
 
-    /* Cache hit: first message (greeting) with 0 user turns */
-    if (messageCount === 0 && studyCtx) {
-      const cacheKey = `${locale}:${studyCtx.studyType}:${studyCtx.productCategory}`;
-      const cached = greetingCache.get(cacheKey);
-      if (cached && Date.now() - cached.ts < GREETING_TTL) {
-        const encoder = new TextEncoder();
-        const cachedStream = new ReadableStream({
-          start(controller) {
-            // Stream cached reply word by word for natural feel
-            const words = cached.reply.split(" ");
-            words.forEach((word, i) => {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk: (i === 0 ? "" : " ") + word })}\n\n`));
-            });
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true })}\n\n`));
-            controller.close();
-          },
-        });
-        return new NextResponse(cachedStream, {
-          headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" },
-        });
-      }
-    }
-
     /* Keep last 14 turns — enough history for anti-repetition checks */
     const recentMessages: ChatMessage[] = (messages as ChatMessage[]).slice(-14);
 
@@ -67,10 +39,10 @@ export async function POST(req: NextRequest) {
         { role: "system", content: buildSystemPrompt(locale, studyCtx, messageCount, typeof customGuide === "string" ? customGuide : undefined) },
         ...recentMessages.map((m) => ({ role: m.role, content: m.content })),
       ],
-      temperature: 0.65,
-      max_tokens: 200,
+      temperature: messageCount === 0 ? 0.90 : 0.55, /* higher on opening for natural variety */
+      max_tokens: 180,
       frequency_penalty: 0.4,
-      presence_penalty: 0.5,  /* Penalise topics already mentioned — reduces question repetition */
+      presence_penalty: 0.5,
       stream: true,
     });
 
@@ -89,12 +61,6 @@ export async function POST(req: NextRequest) {
                 encoder.encode(`data: ${JSON.stringify({ chunk: delta })}\n\n`)
               );
             }
-          }
-
-          /* Cache the opening greeting for future respondents */
-          if (messageCount === 0 && studyCtx && fullReply) {
-            const cacheKey = `${locale}:${studyCtx.studyType}:${studyCtx.productCategory}`;
-            greetingCache.set(cacheKey, { reply: fullReply, ts: Date.now() });
           }
 
           /* Signal completion */

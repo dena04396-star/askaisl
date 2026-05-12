@@ -36,8 +36,7 @@ function attachAnalyser(audio: HTMLAudioElement, analyserRef: { current: Analyse
   if (typeof AudioContext === "undefined") return { ctx: null, teardown: () => {} };
   try {
     const ctx = new AudioContext();
-    const resume = ctx.state === "suspended" ? ctx.resume() : Promise.resolve();
-    resume.catch(() => {});
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
     const src  = ctx.createMediaElementSource(audio);
     const node = ctx.createAnalyser();
     node.fftSize = 512;
@@ -105,7 +104,8 @@ async function playTTS(
       const teardown = () => { if (analyserRef) analyserRef.current = null; ctx?.close().catch(() => {}); };
       const playNext = () => {
         if (cancelled || idx >= chunks.length) { teardown(); onWord?.(total); onEnd(); return; }
-        current = new Audio(`data:audio/mpeg;base64,${chunks[idx]}`);
+        const chunkIdx = idx++;   // increment ONCE here only — prevents double-skip bug
+        current = new Audio(`data:audio/mpeg;base64,${chunks[chunkIdx]}`);
         if (ctx && analyserRef) {
           try {
             const src = ctx.createMediaElementSource(current);
@@ -114,12 +114,11 @@ async function playTTS(
             analyserRef.current = node;
           } catch { /* ignore */ }
         }
-        if (idx === 0) onStart();
-        current.onended = () => { idx++; playNext(); };
-        current.onerror = () => { idx++; playNext(); };
-        current.play().catch(() => { idx++; playNext(); });
-        if (onWord) onWord(Math.round((idx / chunks.length) * total));
-        idx++;
+        if (chunkIdx === 0) onStart();
+        current.onended = () => { playNext(); };
+        current.onerror = () => { playNext(); };
+        current.play().catch(() => { playNext(); });
+        if (onWord) onWord(Math.round(((chunkIdx + 1) / chunks.length) * total));
       };
       playNext();
       return () => { cancelled = true; current?.pause(); teardown(); onEnd(); };
@@ -917,6 +916,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
           <InterviewAvatar
             isSpeaking={isSpeaking}
             isListening={isListening}
+            isLoading={isLoading || isTTSLoading}
             language={LOCALE_BCP47[language]}
             speakText={pendingSpeakText}
             analyserRef={analyserRef}

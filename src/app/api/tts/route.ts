@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
         voice: voiceId || voiceMap[prefix] || "Neerja",
         text: text.slice(0, 2000),
         format: "mp3",
-        speed: "1",
+        speed: "1.05",
         pitch: pitchMap[prefix] ?? "5",
       });
 
