@@ -812,19 +812,43 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
     if (!SR) return;
     const rec = new SR();
     rec.lang = LOCALE_BCP47[activeLang];
-    rec.continuous = false;
-    rec.interimResults = false;
-    let captured = "";
-    rec.onstart  = () => setIsListening(true);
-    rec.onresult = (e: { results: { [x: number]: { [x: number]: { transcript: string } } } }) => {
-      captured = e.results[0]?.[0]?.transcript ?? "";
-      setInput(captured);
+    rec.continuous     = true;   // don't stop on brief pauses
+    rec.interimResults = true;   // show words as they're spoken
+
+    let finalText  = "";
+    let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const resetSilence = () => {
+      if (silenceTimer) clearTimeout(silenceTimer);
+      // auto-send 1.8 s after last word heard
+      silenceTimer = setTimeout(() => { rec.stop(); }, 1800);
     };
-    rec.onerror  = () => { setIsListening(false); captured = ""; };
-    rec.onend    = () => {
+
+    rec.onstart = () => setIsListening(true);
+
+    rec.onresult = (e: { resultIndex: number; results: { [x: number]: { isFinal: boolean; [x: number]: { transcript: string } } } }) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < Object.keys(e.results).length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += t + " ";
+        else interim = t;
+      }
+      setInput((finalText + interim).trim());
+      resetSilence();
+    };
+
+    rec.onerror = () => {
+      if (silenceTimer) clearTimeout(silenceTimer);
       setIsListening(false);
-      if (captured.trim()) { setInput(""); sendUserMessage(captured.trim()); }
     };
+
+    rec.onend = () => {
+      if (silenceTimer) clearTimeout(silenceTimer);
+      setIsListening(false);
+      const text = finalText.trim();
+      if (text) { setInput(""); sendUserMessage(text); }
+    };
+
     recognitionRef.current = rec;
     rec.start();
   };

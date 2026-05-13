@@ -1,9 +1,7 @@
 "use client";
 
 import { MutableRefObject } from "react";
-import dynamic from "next/dynamic";
-
-const Avatar3D = dynamic(() => import("./Avatar3D"), { ssr: false });
+import SimpleAvatar from "./SimpleAvatar";
 
 export interface InterviewAvatarProps {
   isSpeaking:     boolean;
@@ -20,13 +18,13 @@ export interface InterviewAvatarProps {
 export default function InterviewAvatar({
   isSpeaking, isListening, isLoading, analyserRef, onAvatarReady,
 }: InterviewAvatarProps) {
+  onAvatarReady?.(false);
   return (
-    <Avatar3D
+    <SimpleAvatar
       isSpeaking={isSpeaking}
       isListening={isListening}
       isLoading={isLoading}
       analyserRef={analyserRef}
-      onReady={() => onAvatarReady?.(false)}
     />
   );
 }
