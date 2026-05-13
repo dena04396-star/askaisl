@@ -11,7 +11,7 @@ interface Props {
 
 export default function SimpleAvatar({ isSpeaking, isListening, isLoading, analyserRef }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef    = useRef<number>();
+  const rafRef    = useRef<number>(0);
 
   /* live waveform bars driven by analyser */
   useEffect(() => {
