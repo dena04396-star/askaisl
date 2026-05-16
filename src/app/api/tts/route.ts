@@ -3,12 +3,22 @@ import * as googleTTS from "google-tts-api";
 
 export const runtime = "nodejs";
 
+/* Detect writing script from Unicode ranges — wins over lang param */
+function detectScript(text: string): string | null {
+  if (/[඀-෿]/.test(text)) return "si"; // Sinhala
+  if (/[஀-௿]/.test(text)) return "ta"; // Tamil
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   const { text, voiceId, language } = await req.json();
   if (!text || typeof text !== "string")
     return NextResponse.json({ error: "text string is required" }, { status: 400 });
 
-  const prefix = (language || "en").split("-")[0];
+  const paramPrefix = (language || "en").split("-")[0];
+  const scriptLang  = detectScript(text);
+  const prefix      = scriptLang ?? paramPrefix; // Unicode detection wins over param
+
   const token  = process.env.SPEECHGEN_TOKEN;
   const email  = process.env.SPEECHGEN_EMAIL;
 

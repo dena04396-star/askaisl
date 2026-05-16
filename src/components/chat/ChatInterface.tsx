@@ -91,8 +91,8 @@ async function playTTS(
 
     const contentType = res.headers.get("Content-Type") || "";
 
-    /* Google TTS fallback — chunked base64 */
     if (contentType.includes("application/json")) {
+      /* Google TTS fallback — chunked base64 */
       const { chunks } = await res.json() as { fallback: boolean; chunks: string[] };
       let idx = 0;
       let current: HTMLAudioElement | null = null;
@@ -786,7 +786,33 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
         const recorder = new MediaRecorder(stream, { mimeType });
         audioChunksRef.current = [];
         recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
+
+        /* Silence detection via Web Audio — auto-stop after 1.8s of quiet */
+        let silenceCtx: AudioContext | null = null;
+        let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+        let silenceInterval: ReturnType<typeof setInterval> | null = null;
+        try {
+          silenceCtx = new AudioContext();
+          const src = silenceCtx.createMediaStreamSource(stream);
+          const analyserNode = silenceCtx.createAnalyser();
+          analyserNode.fftSize = 256;
+          src.connect(analyserNode);
+          const buf = new Uint8Array(analyserNode.frequencyBinCount);
+          silenceInterval = setInterval(() => {
+            analyserNode.getByteFrequencyData(buf);
+            const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
+            if (avg < 6) {
+              if (!silenceTimer) silenceTimer = setTimeout(() => recorder.stop(), 1800);
+            } else {
+              if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+            }
+          }, 120);
+        } catch { /* iOS may not support AudioContext on mic stream */ }
+
         recorder.onstop = async () => {
+          if (silenceInterval) clearInterval(silenceInterval);
+          if (silenceTimer) clearTimeout(silenceTimer);
+          silenceCtx?.close().catch(() => {});
           stream.getTracks().forEach((t) => t.stop());
           setIsListening(false);
           const blob = new Blob(audioChunksRef.current, { type: mimeType });

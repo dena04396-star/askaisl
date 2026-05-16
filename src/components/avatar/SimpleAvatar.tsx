@@ -10,10 +10,13 @@ interface Props {
 }
 
 export default function SimpleAvatar({ isSpeaking, isListening, isLoading, analyserRef }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef    = useRef<number>(0);
+  const canvasRef    = useRef<HTMLCanvasElement>(null);
+  const micCanvasRef = useRef<HTMLCanvasElement>(null);
+  const rafRef       = useRef<number>(0);
+  const micRafRef    = useRef<number>(0);
+  const micBarRef    = useRef<number[]>([0.15, 0.3, 0.45, 0.6, 0.45, 0.3, 0.15]);
 
-  /* live waveform bars driven by analyser */
+  /* TTS waveform — driven by analyser when speaking */
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -41,22 +44,53 @@ export default function SimpleAvatar({ isSpeaking, isListening, isLoading, analy
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [isSpeaking, analyserRef]);
 
-  const ringColor  = isSpeaking ? "#4ade80" : isListening ? "#60a5fa" : "#fbbf24";
+  /* Listening bars — animated bars via canvas for mic-input feedback */
+  useEffect(() => {
+    const canvas = micCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const BARS = 7;
+    const phases = Array.from({ length: BARS }, (_, i) => (i / BARS) * Math.PI * 2);
+
+    const animate = (t: number) => {
+      micRafRef.current = requestAnimationFrame(animate);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!isListening) return;
+      const barW = canvas.width / BARS;
+      for (let i = 0; i < BARS; i++) {
+        const v = 0.35 + 0.55 * Math.abs(Math.sin(t * 0.003 + phases[i]));
+        const h = Math.max(4, v * canvas.height * 0.88);
+        ctx.fillStyle = `rgba(96,165,250,${0.3 + v * 0.6})`;
+        ctx.beginPath();
+        ctx.roundRect(i * barW + 2, (canvas.height - h) / 2, barW - 4, h, 3);
+        ctx.fill();
+      }
+    };
+    micRafRef.current = requestAnimationFrame(animate);
+    return () => { if (micRafRef.current) cancelAnimationFrame(micRafRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isListening]);
+
+  const ringColor   = isSpeaking ? "#4ade80" : isListening ? "#60a5fa" : "#fbbf24";
   const borderColor = isSpeaking ? "#4ade80" : isListening ? "#60a5fa" : isLoading ? "#fbbf2488" : "rgba(255,255,255,0.10)";
-  const glow       = isSpeaking ? "0 0 40px rgba(74,222,128,0.22)" : isListening ? "0 0 40px rgba(96,165,250,0.18)" : "none";
+  const glow        = isSpeaking ? "0 0 40px rgba(74,222,128,0.22)" : isListening ? "0 0 40px rgba(96,165,250,0.28)" : "none";
 
   return (
     <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: "#0d0d0f", position: "relative", overflow: "hidden" }}>
 
-      {/* animated rings */}
+      {/* animated rings — outward for speaking, inward-pulse for listening */}
       {(isSpeaking || isListening) && [0, 1, 2].map(i => (
         <div key={i} style={{
           position: "absolute",
           width:  220 + i * 64, height: 220 + i * 64,
           borderRadius: "50%",
           border: `1px solid ${ringColor}33`,
-          animation: `sa-ring ${1.2 + i * 0.35}s ease-out infinite`,
-          animationDelay: `${i * 0.25}s`,
+          animation: isListening
+            ? `sa-ring-in ${1.0 + i * 0.30}s ease-in-out infinite`
+            : `sa-ring ${1.2 + i * 0.35}s ease-out infinite`,
+          animationDelay: `${i * 0.22}s`,
           pointerEvents: "none",
         }} />
       ))}
@@ -121,14 +155,22 @@ export default function SimpleAvatar({ isSpeaking, isListening, isLoading, analy
         )}
       </div>
 
-      {/* waveform canvas */}
-      <canvas ref={canvasRef} width={260} height={36} style={{ marginTop: 16, opacity: isSpeaking ? 1 : 0, transition: "opacity 0.3s" }} />
+      {/* TTS waveform canvas — visible when speaking */}
+      <canvas ref={canvasRef} width={260} height={36} style={{ marginTop: 16, opacity: isSpeaking ? 1 : 0, transition: "opacity 0.3s", position: "absolute", bottom: 16 }} />
+
+      {/* Mic input canvas — visible when listening */}
+      <canvas ref={micCanvasRef} width={160} height={36} style={{ marginTop: 16, opacity: isListening ? 1 : 0, transition: "opacity 0.3s", position: "absolute", bottom: 16 }} />
 
       <style>{`
         @keyframes sa-ring {
           0%   { transform: scale(0.92); opacity: 0.7; }
           60%  { transform: scale(1.06); opacity: 0.2; }
           100% { transform: scale(0.92); opacity: 0.7; }
+        }
+        @keyframes sa-ring-in {
+          0%   { transform: scale(1.08); opacity: 0.15; }
+          50%  { transform: scale(0.93); opacity: 0.65; }
+          100% { transform: scale(1.08); opacity: 0.15; }
         }
       `}</style>
     </div>

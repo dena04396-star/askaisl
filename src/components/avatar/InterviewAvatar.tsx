@@ -1,6 +1,6 @@
 "use client";
 
-import { MutableRefObject } from "react";
+import { MutableRefObject, useEffect } from "react";
 import SimpleAvatar from "./SimpleAvatar";
 
 export interface InterviewAvatarProps {
@@ -18,7 +18,7 @@ export interface InterviewAvatarProps {
 export default function InterviewAvatar({
   isSpeaking, isListening, isLoading, analyserRef, onAvatarReady,
 }: InterviewAvatarProps) {
-  onAvatarReady?.(false);
+  useEffect(() => { onAvatarReady?.(false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <SimpleAvatar
       isSpeaking={isSpeaking}
