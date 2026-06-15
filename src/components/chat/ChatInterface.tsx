@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback, startTransition } from "react";
-import { Mic, MicOff, Send, PhoneOff, Copy, Check, Download, Plus, ChevronRight, User, FileText } from "lucide-react";
+import { Mic, MicOff, Send, PhoneOff, Copy, Check, Download, Plus, ChevronRight, User, FileText, Loader2 } from "lucide-react";
 import * as XLSX from "xlsx-js-style";
 import MessageBubble from "./MessageBubble";
 import { Button } from "@/components/ui/Button";
@@ -10,13 +10,35 @@ import type { Locale, StudyType, StudyContext, RespondentDetails } from "@/types
 import dynamic from "next/dynamic";
 const InterviewAvatar = dynamic(() => import("@/components/avatar/InterviewAvatar"), { ssr: false });
 
-declare global {
-  interface Window {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    SpeechRecognition: any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    webkitSpeechRecognition: any;
+/* Voice capture tuning (browser noiseSuppression handles ambient noise, so fixed
+ * thresholds are reliable — no calibration delay, instant speech detection) */
+const SPEECH_RMS_THRESHOLD  = 8;     // level that counts as speech (lower = more sensitive)
+const SILENCE_RMS_THRESHOLD = 5;     // absolute floor below which we consider them silent
+const SILENCE_DROP_RATIO    = 0.22;  // …or once the level drops to this fraction of their own volume
+const SILENCE_HANG_MS       = 500;   // send this soon after they stop talking (very snappy)
+const NO_SPEECH_MS          = 9000;  // single start window — if no speech, mic turns OFF (no loop)
+const MAX_RECORDING_MS      = 30000; // hard safety cap so the mic never records forever
+const MIN_RECORDING_MS      = 350;   // ignore taps/blips shorter than this
+const TRANSCRIPT_PREVIEW_MS = 0;     // 0 = send instantly on stop (no input flash)
+
+/* Non-lexical leading fillers to strip ("oh", "ah", "um"…). If a clip is ONLY
+ * fillers, it isn't sent. Mid-sentence words are left untouched. */
+const LEADING_FILLERS = new Set([
+  "um","umm","uh","uhh","uhm","hmm","hmmm","mm","mmm","mhm",
+  "ah","ahh","aah","oh","ooh","ohh","er","err","erm","eh","huh",
+]);
+function cleanSpokenText(raw: string): string {
+  let t = (raw ?? "").trim();
+  if (!t) return "";
+  const tokens = t.split(/\s+/);
+  let i = 0;
+  while (i < tokens.length) {
+    const w = tokens[i].toLowerCase().replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "");
+    if (LEADING_FILLERS.has(w)) i++; else break;
   }
+  t = tokens.slice(i).join(" ").replace(/^[\s,.!?;:]+/, "").trim();
+  if (t) t = t.charAt(0).toUpperCase() + t.slice(1);
+  return t;
 }
 
 const LOCALE_LABELS: Record<Locale, string> = { en: "English", si: "සිංහල", ta: "தமிழ்" };
@@ -600,6 +622,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   const [input, setInput]             = useState("");
   const [isSpeaking, setIsSpeaking]   = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [isTTSLoading, setIsTTSLoading] = useState(false);
   const [micSupported, setMicSupported] = useState(false);
   const [revealedWords, setRevealedWords] = useState(-1);
@@ -612,14 +635,13 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   const [langOverride, setLangOverride] = useState<Locale | null>(null);
 
   const bottomRef        = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recognitionRef   = useRef<any>(null);
   const stopAudioRef     = useRef<(() => void) | null>(null);
   const taRef            = useRef<HTMLTextAreaElement>(null);
   const autoStarted      = useRef(false);
   const analyserRef      = useRef<AnalyserNode | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef   = useRef<Blob[]>([]);
+  const captureCleanupRef = useRef<(() => void) | null>(null);  // tears down stream/ctx/timers
   const handleMicRef     = useRef<() => void>(() => {});
   const prevSpeakingRef  = useRef(false);
 
@@ -631,10 +653,15 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
   } = useInterviewStore();
 
   useEffect(() => {
-    const hasSR  = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-    const hasMR  = typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
-    if (hasSR || hasMR) startTransition(() => setMicSupported(true));
+    const hasMR = typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+    if (hasMR) startTransition(() => setMicSupported(true));
   }, []);
+
+  /* Tear down any live capture on unmount */
+  useEffect(() => () => { captureCleanupRef.current?.(); stopAudioRef.current?.(); }, []);
+
+  /* Stop recording the moment the interview is no longer active (e.g. user ends session) */
+  useEffect(() => { if (status !== "active") captureCleanupRef.current?.(); }, [status]);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -770,124 +797,158 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
+  /*
+   * Unified voice capture — one path for every device.
+   * Record with MediaRecorder → auto-stop on silence → Groq Whisper (/api/transcribe).
+   * The transcript is typed into the input box, shown briefly, then auto-sent.
+   * Whisper handles English, Sinhala and Tamil far better than the browser's
+   * SpeechRecognition, and behaves identically across desktop and mobile.
+   */
   const handleMic = () => {
-    if (isLoading || isSpeaking || isTTSLoading) return;
-
-    handleMicRef.current = handleMic; // keep ref current
-    /* ── MediaRecorder path (mobile, or when SpeechRecognition unavailable) ── */
-    const useMR = isMobile || !(window.SpeechRecognition || window.webkitSpeechRecognition);
-    if (useMR) {
-      if (isListening) {
-        mediaRecorderRef.current?.stop();
-        return;
-      }
-      navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
-        const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
-        const recorder = new MediaRecorder(stream, { mimeType });
-        audioChunksRef.current = [];
-        recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
-
-        /* Silence detection via Web Audio — auto-stop after 1.8s of quiet */
-        let silenceCtx: AudioContext | null = null;
-        let silenceTimer: ReturnType<typeof setTimeout> | null = null;
-        let silenceInterval: ReturnType<typeof setInterval> | null = null;
-        try {
-          silenceCtx = new AudioContext();
-          const src = silenceCtx.createMediaStreamSource(stream);
-          const analyserNode = silenceCtx.createAnalyser();
-          analyserNode.fftSize = 256;
-          src.connect(analyserNode);
-          const buf = new Uint8Array(analyserNode.frequencyBinCount);
-          silenceInterval = setInterval(() => {
-            analyserNode.getByteFrequencyData(buf);
-            const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
-            if (avg < 6) {
-              if (!silenceTimer) silenceTimer = setTimeout(() => recorder.stop(), 1800);
-            } else {
-              if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
-            }
-          }, 120);
-        } catch { /* iOS may not support AudioContext on mic stream */ }
-
-        recorder.onstop = async () => {
-          if (silenceInterval) clearInterval(silenceInterval);
-          if (silenceTimer) clearTimeout(silenceTimer);
-          silenceCtx?.close().catch(() => {});
-          stream.getTracks().forEach((t) => t.stop());
-          setIsListening(false);
-          const blob = new Blob(audioChunksRef.current, { type: mimeType });
-          try {
-            const form = new FormData();
-            form.append("audio", blob, `audio.${mimeType.includes("mp4") ? "mp4" : "webm"}`);
-            form.append("language", LOCALE_BCP47[activeLang]);
-            const res = await fetch("/api/transcribe", { method: "POST", body: form });
-            const { text } = await res.json();
-            if (text?.trim()) sendUserMessage(text.trim());
-          } catch { /* ignore network errors */ }
-        };
-        mediaRecorderRef.current = recorder;
-        recorder.start();
-        setIsListening(true);
-      }).catch(() => setIsListening(false));
+    /* Already recording → this is a manual "stop & send" tap */
+    if (isListening) {
+      try { mediaRecorderRef.current?.stop(); } catch { /* already stopped */ }
       return;
     }
+    /* Only listen during a live interview (guards the hands-free re-arm after it ends) */
+    if (status !== "active" || showClosingBanner) return;
+    /* Don't arm the mic while the AI is busy or a previous clip is still in flight */
+    if (isLoading || isSpeaking || isTTSLoading || isTranscribing) return;
 
-    /* ── SpeechRecognition path (desktop) ── */
-    if (isListening) { recognitionRef.current?.stop(); return; }
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return;
-    const rec = new SR();
-    rec.lang = LOCALE_BCP47[activeLang];
-    rec.continuous     = true;   // don't stop on brief pauses
-    rec.interimResults = true;   // show words as they're spoken
-
-    let finalText  = "";
-    let silenceTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const resetSilence = () => {
-      if (silenceTimer) clearTimeout(silenceTimer);
-      // auto-send 1.8 s after last word heard
-      silenceTimer = setTimeout(() => { rec.stop(); }, 1800);
+    /* Browser-level cleanup of the mic feed before it ever reaches us.
+     * autoGainControl is OFF on purpose: it ramps the mic up when you stop
+     * talking, which inflates the "silence" level and delays end-of-speech
+     * detection. With it off, going quiet actually reads as quiet. */
+    const audioConstraints: MediaTrackConstraints = {
+      echoCancellation: true,   // don't pick up the avatar's own voice from the speakers
+      noiseSuppression: true,   // strip steady background noise (fans, hum, traffic)
+      autoGainControl: false,   // keep silence quiet so we detect the stop fast
     };
 
-    rec.onstart = () => setIsListening(true);
+    navigator.mediaDevices.getUserMedia({ audio: audioConstraints }).then((stream) => {
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      const startedAt = Date.now();
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
 
-    rec.onresult = (e: { resultIndex: number; results: { [x: number]: { isFinal: boolean; [x: number]: { transcript: string } } } }) => {
-      let interim = "";
-      for (let i = e.resultIndex; i < Object.keys(e.results).length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalText += t + " ";
-        else interim = t;
-      }
-      setInput((finalText + interim).trim());
-      resetSilence();
-    };
+      const stop = () => { try { recorder.stop(); } catch { /* already stopped */ } };
 
-    rec.onerror = () => {
-      if (silenceTimer) clearTimeout(silenceTimer);
-      setIsListening(false);
-    };
+      /* Voice-activity detection via Web Audio — fixed thresholds, instant detection.
+       * Speech is detected the moment the respondent starts (no calibration delay).
+       * The turn ends shortly after they go quiet. If they never speak, the mic
+       * turns off after NO_SPEECH_MS so pure noise is never sent to Whisper. */
+      let speechStarted = false;        // has the respondent actually spoken yet?
+      let maxLevel = 0;                  // loudest (smoothed) moment of this utterance
+      let ema = 0;                       // smoothed level — ignores single-frame spikes/dips
 
-    rec.onend = () => {
-      if (silenceTimer) clearTimeout(silenceTimer);
-      setIsListening(false);
-      const text = finalText.trim();
-      if (text) { setInput(""); sendUserMessage(text); }
-    };
+      let silenceCtx: AudioContext | null = null;
+      let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+      let silenceInterval: ReturnType<typeof setInterval> | null = null;
+      let noSpeechTimer: ReturnType<typeof setTimeout> | null = setTimeout(stop, NO_SPEECH_MS);
+      const maxTimer = setTimeout(stop, MAX_RECORDING_MS);
 
-    recognitionRef.current = rec;
-    rec.start();
+      try {
+        silenceCtx = new AudioContext();
+        if (silenceCtx.state === "suspended") silenceCtx.resume().catch(() => {});
+        const src = silenceCtx.createMediaStreamSource(stream);
+        const analyserNode = silenceCtx.createAnalyser();
+        analyserNode.fftSize = 256;
+        src.connect(analyserNode);
+        const buf = new Uint8Array(analyserNode.frequencyBinCount);
+        silenceInterval = setInterval(() => {
+          analyserNode.getByteFrequencyData(buf);
+          const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
+          ema += (avg - ema) * 0.4;                 // light smoothing (~2-3 frames)
+          if (ema > maxLevel) maxLevel = ema;
+
+          /* End-of-speech is detected RELATIVE to how loud they were, so it works
+           * regardless of room volume: once the level falls well below their own
+           * speaking level (and below an absolute floor) we treat it as silence. */
+          const dynSilence = Math.max(SILENCE_RMS_THRESHOLD, maxLevel * SILENCE_DROP_RATIO);
+
+          if (ema >= SPEECH_RMS_THRESHOLD) {
+            // real speech — engage immediately
+            if (!speechStarted) {
+              speechStarted = true;
+              if (noSpeechTimer) { clearTimeout(noSpeechTimer); noSpeechTimer = null; }
+            }
+            if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+          } else if (speechStarted && ema < dynSilence) {
+            // gone quiet after speaking → end the turn shortly
+            if (!silenceTimer) silenceTimer = setTimeout(stop, SILENCE_HANG_MS);
+          } else if (speechStarted && silenceTimer && ema >= dynSilence) {
+            // they resumed before the hang elapsed — cancel the pending stop
+            clearTimeout(silenceTimer); silenceTimer = null;
+          }
+        }, 60);
+      } catch { /* some mobile browsers won't expose AudioContext on a mic stream — timeout stop still applies */ }
+
+      /* Single idempotent teardown for stream + audio ctx + all timers */
+      const teardownCapture = () => {
+        if (silenceInterval) { clearInterval(silenceInterval); silenceInterval = null; }
+        if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+        if (noSpeechTimer) { clearTimeout(noSpeechTimer); noSpeechTimer = null; }
+        clearTimeout(maxTimer);
+        silenceCtx?.close().catch(() => {}); silenceCtx = null;
+        stream.getTracks().forEach((t) => t.stop());
+        captureCleanupRef.current = null;
+      };
+      /* Lets unmount / external code stop a live recording cleanly */
+      captureCleanupRef.current = () => { stop(); teardownCapture(); };
+
+      recorder.onstop = async () => {
+        teardownCapture();
+        setIsListening(false);
+
+        const elapsed = Date.now() - startedAt;
+        const chunks  = audioChunksRef.current;
+        const bytes   = chunks.reduce((sum, c) => sum + c.size, 0);
+        const hadSpeech = speechStarted && maxLevel >= SPEECH_RMS_THRESHOLD;
+
+        /* No real speech → turn the mic OFF (do NOT loop/re-arm) and never send
+         * background noise to Whisper. The respondent can tap the mic to answer. */
+        if (!hadSpeech || elapsed < MIN_RECORDING_MS || bytes === 0) return;
+
+        setIsTranscribing(true);
+        try {
+          const blob = new Blob(chunks, { type: mimeType });
+          const form = new FormData();
+          form.append("audio", blob, `audio.${mimeType.includes("mp4") ? "mp4" : "webm"}`);
+          form.append("language", LOCALE_BCP47[activeLang]);
+          const res = await fetch("/api/transcribe", { method: "POST", body: form });
+          if (!res.ok) return;
+          const { text } = await res.json();
+          const clean = cleanSpokenText(text);      // strip leading "oh/ah/um" fillers
+          if (!clean) return;                       // only fillers / nothing intelligible
+
+          if (TRANSCRIPT_PREVIEW_MS > 0) {          // optional brief "typed-in" flash
+            setInput(clean);
+            await new Promise((r) => setTimeout(r, TRANSCRIPT_PREVIEW_MS));
+            setInput("");
+          }
+          sendUserMessage(clean);                   // auto-send the moment they stop speaking
+        } catch { /* network/transcription failure — drop quietly, respondent can retry */ }
+        finally { setIsTranscribing(false); }
+      };
+
+      recorder.onerror = () => { teardownCapture(); setIsListening(false); };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsListening(true);
+    }).catch(() => setIsListening(false));
   };
 
   /* Keep handleMicRef pointing at latest handleMic (defined above, after this) */
   useEffect(() => { handleMicRef.current = handleMic; });
 
   /* Status state */
-  const statusLabel = isSpeaking ? "Speaking" : isTTSLoading ? "Preparing…" : isLoading ? "Thinking…" : isListening ? "Listening" : "Ready";
+  const statusLabel = isSpeaking ? "Speaking" : isTTSLoading ? "Preparing…" : isLoading ? "Thinking…" : isTranscribing ? "Transcribing…" : isListening ? "Listening" : "Ready";
   const statusDotStyle: React.CSSProperties = {
     width: 6, height: 6, borderRadius: "50%", transition: "all 0.3s",
-    background: isSpeaking ? "var(--txt)" : isLoading ? "#d97706" : isListening ? "#16a34a" : "var(--txt3)",
-    animation: isSpeaking ? "blink 0.7s infinite" : isLoading ? "blink 1.1s infinite" : "none",
+    background: isSpeaking ? "var(--txt)" : isLoading ? "#d97706" : isTranscribing ? "#d97706" : isListening ? "#16a34a" : "var(--txt3)",
+    animation: isSpeaking ? "blink 0.7s infinite" : (isLoading || isTranscribing) ? "blink 1.1s infinite" : "none",
   };
 
   if (status === "idle" && !preConfig) return <SetupScreen onStart={startInterview} />;
@@ -993,7 +1054,7 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
 
             {/* Status pill */}
             <div style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 16px", borderRadius: 99, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", fontSize: 12, color: "rgba(255,255,255,0.65)" }}>
-              <span style={{ ...statusDotStyle, background: isSpeaking ? "#4ade80" : isLoading ? "#fbbf24" : isListening ? "#60a5fa" : "rgba(255,255,255,0.25)" }} />
+              <span style={{ ...statusDotStyle, background: isSpeaking ? "#4ade80" : (isLoading || isTranscribing) ? "#fbbf24" : isListening ? "#60a5fa" : "rgba(255,255,255,0.25)" }} />
               {statusLabel}
             </div>
 
@@ -1094,16 +1155,20 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Type your response…"
+              placeholder={isListening ? "Listening…" : isTranscribing ? "Transcribing…" : "Type your response…"}
               rows={1}
-              disabled={isLoading}
+              disabled={isLoading || isListening || isTranscribing}
               style={{ flex: 1, background: "none", border: "none", outline: "none", color: "var(--txt)", fontFamily: "inherit", fontSize: 13.5, fontWeight: 300, lineHeight: 1.5, resize: "none", maxHeight: 100, paddingTop: 3, opacity: isLoading ? 0.5 : 1 }}
             />
             {micSupported && (
-              <button onClick={handleMic} aria-label={isListening ? "Stop" : "Speak"}
-                style={{ width: 34, height: 34, borderRadius: 9, border: isListening ? "none" : "1px solid var(--border)", background: isListening ? "var(--inv)" : "var(--bg3)", color: isListening ? "var(--inv-txt)" : "var(--txt2)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s", flexShrink: 0, animation: isListening ? "blink 1s infinite" : "none" }}
+              <button
+                onClick={handleMic}
+                disabled={isTranscribing || isLoading || isSpeaking || isTTSLoading}
+                aria-label={isListening ? "Stop recording" : "Speak"}
+                title={isListening ? "Stop & send" : "Speak your answer"}
+                style={{ width: 34, height: 34, borderRadius: 9, border: isListening ? "none" : "1px solid var(--border)", background: isListening ? "var(--inv)" : "var(--bg3)", color: isListening ? "var(--inv-txt)" : "var(--txt2)", cursor: (isTranscribing || isLoading || isSpeaking || isTTSLoading) ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s", flexShrink: 0, opacity: (isTranscribing || isLoading || isSpeaking || isTTSLoading) && !isListening ? 0.45 : 1, animation: isListening ? "blink 1s infinite" : "none" }}
               >
-                {isListening ? <MicOff size={14} /> : <Mic size={14} />}
+                {isTranscribing ? <Loader2 size={14} className="vt-spin" /> : isListening ? <MicOff size={14} /> : <Mic size={14} />}
               </button>
             )}
             <button onClick={handleSend} disabled={isLoading || !input.trim()} aria-label="Send"
@@ -1121,6 +1186,8 @@ export default function ChatInterface({ preConfig }: { preConfig?: PreConfig }) 
       </div>
       <style>{`
         .vt-chat-root { height: 100vh; height: 100dvh; }
+        .vt-spin { animation: vt-spin 0.8s linear infinite; }
+        @keyframes vt-spin { to { transform: rotate(360deg); } }
         @media (max-width: 767px) {
           .vt-chat-root { overflow: hidden; }
         }
