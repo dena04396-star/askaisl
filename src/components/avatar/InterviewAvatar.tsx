@@ -1,7 +1,6 @@
 "use client";
 
 import { MutableRefObject, useEffect } from "react";
-import SimpleAvatar from "./SimpleAvatar";
 
 export interface InterviewAvatarProps {
   isSpeaking:     boolean;
@@ -15,16 +14,16 @@ export interface InterviewAvatarProps {
   onAvatarReady?: (handlesAudio: boolean) => void;
 }
 
-export default function InterviewAvatar({
-  isSpeaking, isListening, isLoading, analyserRef, onAvatarReady,
-}: InterviewAvatarProps) {
+/* Client asked for a plain image avatar (no animated SVG face). */
+export default function InterviewAvatar({ onAvatarReady }: InterviewAvatarProps) {
   useEffect(() => { onAvatarReady?.(false); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <SimpleAvatar
-      isSpeaking={isSpeaking}
-      isListening={isListening}
-      isLoading={isLoading}
-      analyserRef={analyserRef}
-    />
+    <div style={{ position: "absolute", inset: 0, background: "#0d0d0f" }}>
+      <img
+        src="/dena_avatar.avif"
+        alt="Mrs Dissanayake"
+        style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center top", display: "block" }}
+      />
+    </div>
   );
 }
